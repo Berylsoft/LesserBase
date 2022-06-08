@@ -1,0 +1,31 @@
+[package]
+name = "lesserbase"
+version = "0.1.0"
+edition = "2021"
+authors = ["stackinspector"]
+license = "MPL-2.0"
+
+# [lib]
+# name = "lesserbase"
+# path = "lib.rs"
+
+[[bin]]
+name = "lesserbase"
+path = "main.rs"
+
+# [[bin]]
+# name = "lesserbase-server"
+# path = "server.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+
+structopt = "0.3"
+hex = "0.4"
+anyhow = "*"
+
+serde = { version = "1.0", features = ["derive"] }
+bson = "2.3.0"
+toml = "0.5"
+
+mongodb = "2.2.2"
