@@ -2,10 +2,11 @@
 
 const VERSION: &str = "0.1-alpha";
 const EMPTY_HASH: [u8; HASH_LEN] = [0u8; HASH_LEN];
+const HASH_LEN_I64: i64 = HASH_LEN as i64;
 
-use std::{path::{Path, PathBuf}, fs, io::{self, Write}};
+use std::{path::{Path, PathBuf}, fs::{self, OpenOptions}, io::{self, Read, Write, Seek}};
 use serde::{Serialize, Deserialize};
-use blake3::{Hasher, Hash, OUT_LEN as HASH_LEN};
+use blake3::{Hash, OUT_LEN as HASH_LEN, hash as hash_all};
 
 // region: util
 
@@ -14,15 +15,14 @@ pub fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis().try_into().unwrap()
 }
 
+fn is_file_not_found(err: &io::Error) -> bool {
+    if let io::ErrorKind::NotFound = err.kind() { true } else { false }
+}
+
 fn file_detected(path: &Path) -> io::Result<bool> {
-    if let Err(err) = fs::metadata(path) {
-        if let io::ErrorKind::NotFound = err.kind() {
-            Ok(false)
-        } else {
-            Err(err)
-        }
-    } else {
-        Ok(true)
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(if metadata.is_file() { true } else { false }),
+        Err(err) => if is_file_not_found(&err) { Ok(false) } else { Err(err) },
     }
 }
 
@@ -93,21 +93,127 @@ impl Repo {
     }
 
     pub fn init(&self) -> anyhow::Result<()> {
-        let ref_main = self.path.aref("main");
-
-        if !file_detected(&ref_main)? {
+        if !file_detected(&self.path.aref("main"))? {
             fs::create_dir_all(self.path.objects())?;
             fs::create_dir_all(self.path.commits())?;
             fs::create_dir_all(self.path.refs())?;
-            {
-                let mut ref_main = fs::OpenOptions::new().create_new(true).write(true).open(&ref_main)?;
-                ref_main.write(Hash::from(EMPTY_HASH).to_hex().as_bytes())?;
-                ref_main.write(b"\n")?;
-                ref_main.flush()?;
-            }
+            self.update_ref("main", Hash::from(EMPTY_HASH))?;
         }
 
+        let object = self.add_object(&fs::read(r"D:\root\repo\Berylsoft\lesserbase\lib.rs")?)?;
+        let c = Commit {
+            prev: Hash::from(EMPTY_HASH),
+            ts: now(),
+            author: "stackinspector".to_owned(),
+            rev: vec![
+                Rev {
+                    kind: RevKind::Update,
+                    hash: object,
+                    path: "/test".to_owned(),
+                }
+            ]
+        };
+        let commit = self.add_commit(c)?;
+        self.update_ref("main", commit)?;
+        println!("{:?}", self.get_ref("main"));
         Ok(())
+    }
+
+    fn update_ref(&self, branch: &str, hash: Hash) -> io::Result<()> {
+        let mut file = OpenOptions::new().create(true).append(true).open(self.path.aref(branch))?;
+        file.write(hash.to_hex().as_bytes())?;
+        file.write(b"\n")?;
+        file.flush()?;
+        Ok(())
+    }
+
+    fn get_ref(&self, branch: &str) -> anyhow::Result<Hash> {
+        let mut file = OpenOptions::new().read(true).open(self.path.aref(branch))?;
+        file.seek(io::SeekFrom::End(-(HASH_LEN_I64 * 2 + 1)))?;
+        let mut buf = String::new();
+        file.read_to_string(&mut buf)?;
+        assert_eq!(buf.len(), HASH_LEN * 2 + 1);
+        Ok(Hash::from_hex(&buf[0..HASH_LEN * 2])?)
+    }
+
+    fn add_object(&self, blob: &[u8]) -> io::Result<Hash> {
+        let hash = hash_all(blob);
+        // TODO: err: hash collision
+        let mut file = OpenOptions::new().create_new(true).write(true).open(self.path.object(hash))?;
+        file.write_all(blob)?;
+        Ok(hash)
+    }
+
+    fn get_object(&self, hash: Hash) -> io::Result<Vec<u8>> {
+        fs::read(self.path.object(hash))
+    }
+
+    fn add_commit(&self, commit: Commit) -> io::Result<Hash> {
+        let encoded = commit.encode();
+        let blob = encoded.as_bytes();
+        let hash = hash_all(blob);
+        // TODO: err: hash collision
+        let mut file = OpenOptions::new().create_new(true).write(true).open(self.path.commit(hash))?;
+        file.write_all(blob)?;
+        Ok(hash)
+    }
+}
+
+struct Commit {
+    pub prev: Hash,
+    pub ts: u64,
+    pub author: String,
+    pub rev: Vec<Rev>,
+}
+
+impl Commit {
+    fn encode(&self) -> String {
+        let mut str = String::new();
+        str.push('*');
+        str.push(' ');
+        str.push_str(self.prev.to_hex().as_str());
+        str.push(' ');
+        str.push_str(&self.ts.to_string());
+        str.push(' ');
+        str.push_str(&self.author);
+        str.push('\n');
+        for r in self.rev.iter() {
+            str.push(r.kind.as_symbol());
+            str.push(' ');
+            str.push_str(r.hash.to_hex().as_str());
+            str.push(' ');
+            str.push_str(&r.path);
+            str.push('\n');
+        }
+        str
+    }
+}
+
+struct Rev {
+    pub kind: RevKind,
+    pub hash: Hash,
+    pub path: String,
+}
+
+enum RevKind {
+    Update,
+    Remove,
+}
+
+impl RevKind {
+    fn as_symbol(&self) -> char {
+        match self {
+            RevKind::Update => '+',
+            RevKind::Remove => '-',
+        }
+    }
+
+    fn to_symbol(c: char) -> RevKind {
+        match c {
+            '+' => RevKind::Update,
+            '-' => RevKind::Remove,
+            _ => unreachable!(),
+        }
     }
 }
 
