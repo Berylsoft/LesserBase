@@ -43,7 +43,6 @@ struct PathBuilder {
     refs: PathBuf,
 }
 
-// TODO: macro
 impl PathBuilder {
     fn new(root: PathBuf) -> PathBuilder {
         PathBuilder {
@@ -54,12 +53,6 @@ impl PathBuilder {
             root,
         }
     }
-
-    fn root(&self) -> &PathBuf { &self.root }
-    fn config(&self) -> &PathBuf { &self.config }
-    fn objects(&self) -> &PathBuf { &self.objects }
-    fn commits(&self) -> &PathBuf { &self.commits }
-    fn refs(&self) -> &PathBuf { &self.refs }
 
     fn object(&self, hash: Hash) -> PathBuf {
         self.objects.join(hash.to_hex().as_str())
@@ -73,6 +66,19 @@ impl PathBuilder {
         self.refs.join(branch)
     }
 }
+
+macro_rules! path_builder_get_impl {
+    ($($x:ident,)*) => {
+        impl PathBuilder {
+            $(
+            #[inline]
+            fn $x(&self) -> &PathBuf { &self.$x }
+            )*
+        }
+    };
+}
+
+path_builder_get_impl!(root, config, objects, commits, refs, );
 
 pub struct Repo {
     config: RepoConfig,
@@ -264,6 +270,68 @@ impl From<RevKind> for u8 {
 }
 
 // endregion
+
+pub const STATE_CACHE_MAX_BYTE: u64 = 1024 * 1024 * 16;
+pub const STATE_FLUSH_INTERVAL_MS: u64 = 1000;
+
+struct State {
+    db: sled::Db,
+    main: sled::Tree,
+    // branches: HashMap<String, sled::Tree>,
+}
+
+fn apply_rev_inner(tree: &sled::Tree, rev: &Vec<Rev>) -> anyhow::Result<()> {
+    for r in rev {
+        match r.kind {
+            RevKind::Update => {
+                tree.insert(r.path.as_bytes(), r.hash.as_bytes())?;
+            }
+            RevKind::Remove => {
+                tree.remove(r.path.as_bytes())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn query_path_inner(tree: &sled::Tree, path: &str) -> anyhow::Result<Hash> {
+    let x = tree.get(path)?.ok_or_else(|| anyhow::anyhow!(""))?;
+    let y: HashInner = x.as_ref().try_into().unwrap();
+    Ok(Hash::from(y))
+}
+
+impl State {
+    fn new(path: PathBuf) -> anyhow::Result<State> {
+        let db = sled::Config::default()
+            .path(path)
+            .cache_capacity(STATE_CACHE_MAX_BYTE)
+            .flush_every_ms(Some(STATE_FLUSH_INTERVAL_MS))
+            .open()?;
+        let main = db.open_tree("main")?;
+        Ok(State { db, main })
+    }
+
+    // TODO clear out overhead of db.open_tree
+    fn open_branch(&self, branch: &str) -> sled::Result<sled::Tree> {
+        self.db.open_tree(branch)
+    }
+
+    fn apply_rev(&self, branch: &str, rev: &Vec<Rev>) -> anyhow::Result<()> {
+        apply_rev_inner(&self.open_branch(branch)?, rev)
+    }
+
+    fn apply_rev_main(&self, rev: &Vec<Rev>) -> anyhow::Result<()> {
+        apply_rev_inner(&self.main, rev)
+    }
+
+    fn query_path(&self, branch: &str, path: &str) -> anyhow::Result<Hash> {
+        query_path_inner(&self.open_branch(branch)?, path)
+    }
+
+    fn query_path_main(&self, path: &str) -> anyhow::Result<Hash> {
+        query_path_inner(&self.main, path)
+    }
+}
 
 #[derive(Debug)]
 pub enum Command {}

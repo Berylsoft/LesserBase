@@ -29,4 +29,6 @@ serde = { version = "1.0", features = ["derive"] }
 bson = "2.3.0"
 toml = "0.5"
 
+sled = "0.34.7"
+
 mongodb = "2.2.2"
