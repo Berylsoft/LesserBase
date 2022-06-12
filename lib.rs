@@ -1,14 +1,14 @@
 #![allow(dead_code)]
 
 const VERSION: &str = "0.1-alpha";
-type HashInner = [u8; HASH_LEN];
-const EMPTY_HASH: HashInner = [0u8; HASH_LEN];
-const HASH_LEN_I64: i64 = HASH_LEN as i64;
 
 use std::{path::{Path, PathBuf}, fs::{self, OpenOptions}, io::{self, Read, Write, Seek}};
 use serde::{Serialize, Deserialize};
-// use serde_with::serde_as;
 use blake3::{Hash, OUT_LEN as HASH_LEN, hash as hash_all};
+
+type HashInner = [u8; HASH_LEN];
+const EMPTY_HASH: HashInner = [0u8; HASH_LEN];
+const HASH_LEN_I64: i64 = HASH_LEN as i64;
 
 // region: util
 
@@ -26,6 +26,20 @@ fn file_detected(path: &Path) -> io::Result<bool> {
         Ok(metadata) => Ok(if metadata.is_file() { true } else { false }),
         Err(err) => if is_file_not_found(&err) { Ok(false) } else { Err(err) },
     }
+}
+
+fn hash_to_bson_bin(hash: Hash) -> bson::Binary {
+    bson::Binary { subtype: bson::spec::BinarySubtype::Generic, bytes: hash.as_bytes().to_vec() }
+}
+
+fn bson_bin_to_hash(raw: bson::Binary) -> Hash {
+    let inner: HashInner = raw.bytes.try_into().unwrap();
+    Hash::from(inner)
+}
+
+fn ivec_to_hash(raw: sled::IVec) -> Hash {
+    let inner: HashInner = raw.as_ref().try_into().unwrap();
+    Hash::from(inner)
 }
 
 // endregion
@@ -107,24 +121,6 @@ impl Repo {
             fs::create_dir_all(self.path.refs())?;
             self.update_ref("main", Hash::from(EMPTY_HASH))?;
         }
-
-        let object = self.add_object(&fs::read(r"D:\root\repo\Berylsoft\lesserbase\lib.rs")?)?;
-        let c = Commit {
-            prev: Hash::from(EMPTY_HASH),
-            ts: now(),
-            author: "stackinspector".to_owned(),
-            rev: vec![
-                Rev {
-                    kind: RevKind::Update,
-                    hash: object,
-                    path: "/test".to_owned(),
-                }
-            ]
-        };
-        let commit = self.add_commit(c)?;
-        self.update_ref("main", commit)?;
-        println!("{:?}", self.get_ref("main"));
-        println!("{:?}", self.get_commit(commit));
         Ok(())
     }
 
@@ -211,15 +207,6 @@ struct RevDocument {
     pub path: String,
 }
 
-fn hash_to_bson_bin(hash: Hash) -> bson::Binary {
-    bson::Binary { subtype: bson::spec::BinarySubtype::Generic, bytes: hash.as_bytes().to_vec() }
-}
-
-fn bson_bin_to_hash(raw: bson::Binary) -> Hash {
-    let inner: HashInner = raw.bytes.try_into().unwrap();
-    Hash::from(inner)
-}
-
 impl From<Commit> for CommitDocument {
     fn from(commit: Commit) -> CommitDocument {
         CommitDocument {
@@ -276,28 +263,8 @@ pub const STATE_FLUSH_INTERVAL_MS: u64 = 1000;
 
 struct State {
     db: sled::Db,
-    main: sled::Tree,
-    // branches: HashMap<String, sled::Tree>,
-}
-
-fn apply_rev_inner(tree: &sled::Tree, rev: &Vec<Rev>) -> anyhow::Result<()> {
-    for r in rev {
-        match r.kind {
-            RevKind::Update => {
-                tree.insert(r.path.as_bytes(), r.hash.as_bytes())?;
-            }
-            RevKind::Remove => {
-                tree.remove(r.path.as_bytes())?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn query_path_inner(tree: &sled::Tree, path: &str) -> anyhow::Result<Hash> {
-    let x = tree.get(path)?.ok_or_else(|| anyhow::anyhow!(""))?;
-    let y: HashInner = x.as_ref().try_into().unwrap();
-    Ok(Hash::from(y))
+    path: sled::Tree,
+    head: sled::Tree,
 }
 
 impl State {
@@ -307,31 +274,38 @@ impl State {
             .cache_capacity(STATE_CACHE_MAX_BYTE)
             .flush_every_ms(Some(STATE_FLUSH_INTERVAL_MS))
             .open()?;
-        let main = db.open_tree("main")?;
-        Ok(State { db, main })
-    }
-
-    // TODO clear out overhead of db.open_tree
-    fn open_branch(&self, branch: &str) -> sled::Result<sled::Tree> {
-        self.db.open_tree(branch)
+        let path = db.open_tree("path")?;
+        let head = db.open_tree("head")?;
+        Ok(State { db, path, head })
     }
 
     fn apply_rev(&self, branch: &str, rev: &Vec<Rev>) -> anyhow::Result<()> {
-        apply_rev_inner(&self.open_branch(branch)?, rev)
-    }
-
-    fn apply_rev_main(&self, rev: &Vec<Rev>) -> anyhow::Result<()> {
-        apply_rev_inner(&self.main, rev)
+        for r in rev {
+            let path = format!("{}::{}", branch, r.path);
+            match r.kind {
+                RevKind::Update => {
+                    self.path.insert(path.as_bytes(), r.hash.as_bytes())?;
+                }
+                RevKind::Remove => {
+                    self.path.remove(path.as_bytes())?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn query_path(&self, branch: &str, path: &str) -> anyhow::Result<Hash> {
-        query_path_inner(&self.open_branch(branch)?, path)
+        let hash = self.path.get(format!("{}::{}", branch, path))?.ok_or_else(|| anyhow::anyhow!(""))?;
+        Ok(ivec_to_hash(hash))
     }
 
-    fn query_path_main(&self, path: &str) -> anyhow::Result<Hash> {
-        query_path_inner(&self.main, path)
+    fn update_head(&self, branch: &str, hash: Hash) -> anyhow::Result<()> {
+        self.head.insert(branch, hash.as_bytes())?;
+        Ok(())
+    }
+
+    fn get_head(&self, branch: &str) -> anyhow::Result<Hash> {
+        let hash = self.head.get(branch)?.ok_or_else(|| anyhow::anyhow!(""))?;
+        Ok(ivec_to_hash(hash))
     }
 }
-
-#[derive(Debug)]
-pub enum Command {}
