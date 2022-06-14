@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use structopt::StructOpt;
-use lesserbase::Repo;
+use lesserbase::local::Repo;
 
 #[derive(StructOpt)]
 struct Args {
