@@ -42,6 +42,13 @@ fn ivec_to_hash(raw: sled::IVec) -> Hash {
     Hash::from(inner)
 }
 
+fn as_one_char(s: &str) -> char {
+    let mut iter = s.chars();
+    let elem = iter.next().unwrap();
+    assert!(matches!(iter.next(), None));
+    elem
+}
+
 // endregion
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -174,6 +181,7 @@ struct Commit {
     pub prev: Hash,
     pub ts: u64,
     pub author: String,
+    pub comment: String,
     pub rev: Vec<Rev>,
 }
 
@@ -181,13 +189,69 @@ struct Commit {
 struct Rev {
     pub kind: RevKind,
     pub hash: Hash,
+    pub object_kind: ObjectKind,
     pub path: String,
+}
+
+#[derive(Debug)]
+enum ObjectKind {
+    Data,
+    Page,
+}
+
+impl ObjectKind {
+    fn from_digit(digit: u8) -> ObjectKind {
+        match digit {
+            0 => ObjectKind::Page,
+            1 => ObjectKind::Data,
+            _ => unreachable!(),
+        }
+    }
+
+    fn to_digit(&self) -> u8 {
+        match self {
+            ObjectKind::Page => 0,
+            ObjectKind::Data => 1,
+        }
+    }
+
+    fn from_sign(sign: char) -> ObjectKind {
+        match sign {
+            'D' => ObjectKind::Data,
+            'P' => ObjectKind::Page,
+            _ => unreachable!(),
+        }
+    }
+
+    fn to_sign(&self) -> char {
+        match self {
+            ObjectKind::Data => 'D',
+            ObjectKind::Page => 'P',
+        }
+    }
 }
 
 #[derive(Debug)]
 enum RevKind {
     Update,
     Remove,
+}
+
+impl RevKind {
+    fn from_digit(digit: u8) -> RevKind {
+        match digit {
+            0 => RevKind::Update,
+            1 => RevKind::Remove,
+            _ => unreachable!(),
+        }
+    }
+
+    fn to_digit(&self) -> u8 {
+        match self {
+            RevKind::Update => 0,
+            RevKind::Remove => 1,
+        }
+    }
 }
 
 // region: serde helper
@@ -197,6 +261,7 @@ struct CommitDocument {
     pub prev: bson::Binary,
     pub ts: u64,
     pub author: String,
+    pub comment: String,
     pub rev: Vec<RevDocument>,
 }
 
@@ -204,6 +269,7 @@ struct CommitDocument {
 struct RevDocument {
     pub kind: u8,
     pub hash: bson::Binary,
+    pub object_kind: u8,
     pub path: String,
 }
 
@@ -213,9 +279,11 @@ impl From<Commit> for CommitDocument {
             prev: hash_to_bson_bin(commit.prev),
             ts: commit.ts,
             author: commit.author,
+            comment: commit.comment,
             rev: commit.rev.into_iter().map(|r| RevDocument {
-                kind: r.kind.into(),
+                kind: r.kind.to_digit(),
                 hash: hash_to_bson_bin(r.hash),
+                object_kind: r.object_kind.to_digit(),
                 path: r.path,
             }).collect(),
         }
@@ -228,30 +296,13 @@ impl From<CommitDocument> for Commit {
             prev: bson_bin_to_hash(doc.prev),
             ts: doc.ts,
             author: doc.author,
+            comment: doc.comment,
             rev: doc.rev.into_iter().map(|r| Rev {
-                kind: r.kind.into(),
+                kind: RevKind::from_digit(r.kind),
                 hash: bson_bin_to_hash(r.hash),
+                object_kind: ObjectKind::from_digit(r.object_kind),
                 path: r.path,
             }).collect(),
-        }
-    }
-}
-
-impl From<u8> for RevKind {
-    fn from(digit: u8) -> Self {
-        match digit {
-            0 => RevKind::Update,
-            1 => RevKind::Remove,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl From<RevKind> for u8 {
-    fn from(kind: RevKind) -> Self {
-        match kind {
-            RevKind::Update => 0,
-            RevKind::Remove => 1,
         }
     }
 }
@@ -281,7 +332,7 @@ impl State {
 
     fn apply_rev(&self, branch: &str, rev: &Vec<Rev>) -> anyhow::Result<()> {
         for r in rev {
-            let path = format!("{}::{}", branch, r.path);
+            let path = format!("{}|{}|{}", branch, r.object_kind.to_sign(), r.path);
             match r.kind {
                 RevKind::Update => {
                     self.path.insert(path.as_bytes(), r.hash.as_bytes())?;
@@ -294,8 +345,8 @@ impl State {
         Ok(())
     }
 
-    fn query_path(&self, branch: &str, path: &str) -> anyhow::Result<Hash> {
-        let hash = self.path.get(format!("{}::{}", branch, path))?.ok_or_else(|| anyhow::anyhow!(""))?;
+    fn query_path(&self, branch: &str, kind: ObjectKind, path: &str) -> anyhow::Result<Hash> {
+        let hash = self.path.get(format!("{}|{}|{}", branch, kind.to_sign(), path))?.ok_or_else(|| anyhow::anyhow!(""))?;
         Ok(ivec_to_hash(hash))
     }
 
@@ -308,4 +359,15 @@ impl State {
         let hash = self.head.get(branch)?.ok_or_else(|| anyhow::anyhow!(""))?;
         Ok(ivec_to_hash(hash))
     }
+}
+
+pub struct Command {
+    author: String,
+    ts: u64,
+    inner: CommandInner,
+}
+
+#[derive(Debug)]
+pub enum CommandInner {
+    Commit { comment: String,  }
 }
