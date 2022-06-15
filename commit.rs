@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use num_enum::{TryFromPrimitive, IntoPrimitive};
 
 #[derive(Debug)]
 pub struct Commit {
@@ -17,65 +18,18 @@ pub struct Rev {
     pub path: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[repr(u8)]
 pub enum ObjectKind {
     Data,
     Page,
 }
 
-impl ObjectKind {
-    pub fn from_digit(digit: u8) -> ObjectKind {
-        match digit {
-            0 => ObjectKind::Page,
-            1 => ObjectKind::Data,
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn to_digit(&self) -> u8 {
-        match self {
-            ObjectKind::Page => 0,
-            ObjectKind::Data => 1,
-        }
-    }
-
-    pub fn from_sign(sign: char) -> ObjectKind {
-        match sign {
-            'D' => ObjectKind::Data,
-            'P' => ObjectKind::Page,
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn to_sign(&self) -> char {
-        match self {
-            ObjectKind::Data => 'D',
-            ObjectKind::Page => 'P',
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[repr(u8)]
 pub enum RevKind {
     Update,
     Remove,
-}
-
-impl RevKind {
-    pub fn from_digit(digit: u8) -> RevKind {
-        match digit {
-            0 => RevKind::Update,
-            1 => RevKind::Remove,
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn to_digit(&self) -> u8 {
-        match self {
-            RevKind::Update => 0,
-            RevKind::Remove => 1,
-        }
-    }
 }
 
 // region: serde helper
@@ -105,9 +59,9 @@ impl From<Commit> for CommitDocument {
             author: commit.author,
             comment: commit.comment,
             rev: commit.rev.into_iter().map(|r| RevDocument {
-                kind: r.kind.to_digit(),
+                kind: r.kind.into(),
                 hash: hash_to_bson_bin(r.hash),
-                object_kind: r.object_kind.to_digit(),
+                object_kind: r.object_kind.into(),
                 path: r.path,
             }).collect(),
         }
@@ -122,9 +76,9 @@ impl From<CommitDocument> for Commit {
             author: doc.author,
             comment: doc.comment,
             rev: doc.rev.into_iter().map(|r| Rev {
-                kind: RevKind::from_digit(r.kind),
+                kind: RevKind::try_from(r.kind).unwrap(),
                 hash: bson_bin_to_hash(r.hash),
-                object_kind: ObjectKind::from_digit(r.object_kind),
+                object_kind: ObjectKind::try_from(r.object_kind).unwrap(),
                 path: r.path,
             }).collect(),
         }

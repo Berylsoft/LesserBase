@@ -24,6 +24,7 @@ structopt = "0.3"
 hex = "0.4"
 anyhow = "*"
 blake3 = "*"
+num_enum = "*"
 
 serde = { version = "1.0", features = ["derive"] }
 bson = "2.3.0"

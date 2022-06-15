@@ -23,7 +23,7 @@ impl State {
 
     pub fn apply_rev(&self, branch: &str, rev: &Vec<Rev>) -> anyhow::Result<()> {
         for r in rev {
-            let path = format!("{}|{}|{}", branch, r.object_kind.to_sign(), r.path);
+            let path = format!("{}|{:?}|{}", branch, r.object_kind, r.path);
             match r.kind {
                 RevKind::Update => {
                     self.path.insert(path.as_bytes(), r.hash.as_bytes())?;
@@ -37,7 +37,7 @@ impl State {
     }
 
     pub fn query_path(&self, branch: &str, kind: ObjectKind, path: &str) -> anyhow::Result<Hash> {
-        let hash = self.path.get(format!("{}|{}|{}", branch, kind.to_sign(), path))?.ok_or_else(|| anyhow::anyhow!(""))?;
+        let hash = self.path.get(format!("{}|{:?}|{}", branch, kind, path))?.ok_or_else(|| anyhow::anyhow!(""))?;
         Ok(ivec_to_hash(hash))
     }
 
