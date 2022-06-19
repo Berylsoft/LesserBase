@@ -1,6 +1,9 @@
 use crate::prelude::*;
 use num_enum::{TryFromPrimitive, IntoPrimitive};
 
+const OBJECT_KIND_DATA_STR: &'static str = "data";
+const OBJECT_KIND_PAGE_STR: &'static str = "page";
+
 #[derive(Debug)]
 pub struct Commit {
     pub prev: Hash,
@@ -25,6 +28,15 @@ pub enum ObjectKind {
     Page,
 }
 
+impl ObjectKind {
+    pub fn to_sign(&self) -> &'static str {
+        match self {
+            ObjectKind::Data => OBJECT_KIND_DATA_STR,
+            ObjectKind::Page => OBJECT_KIND_PAGE_STR,
+        }
+    }
+}
+
 #[derive(Debug, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
 pub enum RevKind {
@@ -43,7 +55,7 @@ pub struct CommitDocument {
     pub rev: Vec<RevDocument>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct RevDocument {
     pub kind: u8,
     pub hash: bson::Binary,

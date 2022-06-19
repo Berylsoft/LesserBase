@@ -19,6 +19,7 @@ path = "main.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
+futures = "*"
 
 structopt = "0.3"
 hex = "0.4"
@@ -27,9 +28,9 @@ blake3 = "*"
 num_enum = "*"
 
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "*"
 bson = "2.3.0"
+jsonschema = "*"
 toml = "0.5"
-
-sled = "0.34.7"
 
 mongodb = "2.2.2"

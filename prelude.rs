@@ -1,5 +1,7 @@
 pub use std::{path::{Path, PathBuf}, fs::{self, OpenOptions}, io::{self, Read, Write, Seek}};
 pub use serde::{Serialize, Deserialize};
+pub use serde_json::{Value as Json, json};
+pub use bson::{Bson, Document as BsonDocument, bson, doc as bson_doc};
 pub use blake3::{Hash, OUT_LEN as HASH_LEN, hash as hash_all};
 
 pub use crate::VERSION;
@@ -33,14 +35,23 @@ pub fn bson_bin_to_hash(raw: bson::Binary) -> Hash {
     Hash::from(inner)
 }
 
-pub fn ivec_to_hash(raw: sled::IVec) -> Hash {
-    let inner: HashInner = raw.as_ref().try_into().unwrap();
-    Hash::from(inner)
-}
-
 pub fn as_one_char(s: &str) -> char {
     let mut iter = s.chars();
     let elem = iter.next().unwrap();
     assert!(matches!(iter.next(), None));
     elem
+}
+
+pub fn bson_to_doc(bson: Bson) -> anyhow::Result<BsonDocument> {
+    match bson {
+        Bson::Document(doc) => Ok(doc),
+        _ => Err(anyhow::anyhow!("bson_to_doc failed")),
+    }
+}
+
+pub fn json_to_string(json: Json) -> anyhow::Result<String> {
+    match json {
+        Json::String(string) => Ok(string),
+        _ => Err(anyhow::anyhow!("json_to_string failed")),
+    }
 }
