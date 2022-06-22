@@ -6,6 +6,7 @@ pub mod prelude;
 pub mod local;
 pub mod commit;
 pub mod schema;
-// pub mod state;
+pub mod state;
 pub mod view;
 pub mod command;
+pub mod executor;

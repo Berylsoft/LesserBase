@@ -34,3 +34,4 @@ jsonschema = "*"
 toml = "0.5"
 
 mongodb = "2.2.2"
+redis = "0.21.5"

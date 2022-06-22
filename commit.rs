@@ -10,6 +10,7 @@ pub struct Commit {
     pub ts: u64,
     pub author: String,
     pub comment: String,
+    pub merge: Option<Branch>,
     pub rev: Vec<Rev>,
 }
 
@@ -52,6 +53,7 @@ pub struct CommitDocument {
     pub ts: u64,
     pub author: String,
     pub comment: String,
+    pub merge: Option<Branch>,
     pub rev: Vec<RevDocument>,
 }
 
@@ -70,6 +72,7 @@ impl From<Commit> for CommitDocument {
             ts: commit.ts,
             author: commit.author,
             comment: commit.comment,
+            merge: commit.merge,
             rev: commit.rev.into_iter().map(|r| RevDocument {
                 kind: r.kind.into(),
                 hash: hash_to_bson_bin(r.hash),
@@ -87,6 +90,7 @@ impl From<CommitDocument> for Commit {
             ts: doc.ts,
             author: doc.author,
             comment: doc.comment,
+            merge: doc.merge,
             rev: doc.rev.into_iter().map(|r| Rev {
                 kind: RevKind::try_from(r.kind).unwrap(),
                 hash: bson_bin_to_hash(r.hash),
@@ -99,16 +103,32 @@ impl From<CommitDocument> for Commit {
 
 // endregion
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum Branch {
     Main,
-    Common { ts: u64, author: String },
+    Common(CommonBranch),
+}
+
+pub use Branch::Main;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommonBranch {
+    pub ts: u64,
+    pub author: String,
 }
 
 impl Branch {
     pub fn to_string(&self) -> String {
         match self {
             Branch::Main => "main".to_owned(),
-            Branch::Common { ts, author } => format!("{}-{}", ts, author),
+            Branch::Common(b) => b.to_string(),
         }
+    }
+}
+
+impl CommonBranch {
+    pub fn to_string(&self) -> String {
+        format!("{}-{}", self.ts, self.author)
     }
 }

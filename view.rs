@@ -1,5 +1,4 @@
-use crate::prelude::*;
-use futures::stream::TryStreamExt;
+use crate::{prelude::*, commit::*};
 use mongodb::{Client, Database, Collection};
 
 type LooseTypedCollection = Collection<BsonDocument>;
@@ -30,9 +29,7 @@ async fn get_content_by_hash_id_inner(coll: &LooseTypedCollection, hash: Hash) -
     let query = bson_doc! {
         "_id": hash_to_bson_bin(hash),
     };
-    let mut cursor = coll.find(query, None).await?;
-    let result = cursor.try_next().await?.expect("not found");
-    debug_assert!(matches!(cursor.try_next().await?, None));
+    let result = coll.find_one(query, None).await?.expect("not found");
     debug_assert_eq!(result.get_binary_generic("_id")?, hash.as_bytes());
     Ok(result)
 }
@@ -64,9 +61,10 @@ impl View {
         })
     }
 
-    pub async fn create_ref(&self, branch: &str, hash: Hash) -> anyhow::Result<()> {
+    pub async fn create_ref(&self, branch: &Branch, hash: Hash) -> anyhow::Result<()> {
+        let branch = branch.to_string();
         let doc = bson_doc! {
-            "_id": branch,
+            "_id": &branch,
             "hashes": [
                 hash_to_bson_bin(hash),
             ],
@@ -76,9 +74,10 @@ impl View {
         Ok(())
     }
 
-    pub async fn update_ref(&self, branch: &str, hash: Hash) -> anyhow::Result<()> {
+    pub async fn update_ref(&self, branch: &Branch, hash: Hash) -> anyhow::Result<()> {
+        let branch = branch.to_string();
         let query = bson_doc! {
-            "_id": branch,
+            "_id": &branch,
         };
         let update = bson_doc! {
             "$push": {
@@ -92,13 +91,12 @@ impl View {
         Ok(())
     }
 
-    pub async fn get_ref(&self, branch: &str) -> anyhow::Result<Hash> {
+    pub async fn get_ref(&self, branch: &Branch) -> anyhow::Result<Hash> {
+        let branch = branch.to_string();
         let query = bson_doc! {
-            "_id": branch,
+            "_id": &branch,
         };
-        let mut cursor = self.coll_vcs_refs.find(query, None).await?;
-        let result = cursor.try_next().await?.expect("not found");
-        debug_assert!(matches!(cursor.try_next().await?, None));
+        let result = self.coll_vcs_refs.find_one(query, None).await?.expect("not found");
         debug_assert_eq!(result.get_str("_id")?, branch);
         Ok(bson_to_hash(result.get_array("hashes")?.last().unwrap().clone())?)
     }
@@ -131,5 +129,19 @@ impl View {
     #[inline]
     pub async fn get_commit(&self, hash: Hash) -> anyhow::Result<BsonDocument> {
         get_doc_content_by_hash_id(&self.coll_vcs_commits, hash).await
+    }
+
+    pub async fn update_page(&self, path: String, content: String) -> anyhow::Result<()> {
+        // let query = 
+        // let doc = bson_doc! {
+        //     "content": content,
+        // };
+        // let result = self.coll_latest_page.replace_one(doc, None).await?;
+        // debug_assert_eq!(&path, result.inserted_id.as_str());
+        Ok(())
+    }
+
+    pub async fn update_data(&self, path: String, content: BsonDocument) -> anyhow::Result<()> {
+        Ok(())
     }
 }
