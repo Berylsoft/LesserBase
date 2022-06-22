@@ -90,6 +90,14 @@ impl Repo {
         Ok(())
     }
 
+    pub fn create_ref(&self, branch: &str, hash: Hash) -> io::Result<()> {
+        let mut file = OpenOptions::new().create_new(true).write(true).open(self.path.aref(branch))?;
+        file.write(hash.to_hex().as_bytes())?;
+        file.write(b"\n")?;
+        file.flush()?;
+        Ok(())
+    }
+
     pub fn update_ref(&self, branch: &str, hash: Hash) -> io::Result<()> {
         let mut file = OpenOptions::new().create(true).append(true).open(self.path.aref(branch))?;
         file.write(hash.to_hex().as_bytes())?;

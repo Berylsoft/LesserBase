@@ -98,3 +98,17 @@ impl From<CommitDocument> for Commit {
 }
 
 // endregion
+
+pub enum Branch {
+    Main,
+    Common { ts: u64, author: String },
+}
+
+impl Branch {
+    pub fn to_string(&self) -> String {
+        match self {
+            Branch::Main => "main".to_owned(),
+            Branch::Common { ts, author } => format!("{}-{}", ts, author),
+        }
+    }
+}

@@ -6,35 +6,41 @@ pub trait Request {
 
 #[derive(Debug, Deserialize)]
 pub struct Command {
-    author: String,
     ts: u64,
+    author: String,
     inner: CommandInner,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", content = "inner")]
 pub enum CommandInner {
-    Commit(CmdCommit)
+    Commit(CmdCommit),
+    CreateBranch(CmdCreateBranch),
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CmdCommit {
-    comment: String,
-    branch: String,
-    prev: String,
-    rev: Vec<CmdRev>,
+    pub comment: String,
+    pub branch: String,
+    pub prev: String,
+    pub rev: Vec<CmdRev>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CmdRev {
-    kind: u8,
-    object_kind: u8,
-    path: String,
-    content: Json,
+    pub kind: u8,
+    pub object_kind: u8,
+    pub path: String,
+    pub content: Json,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CmdCreateBranch {
+    pub prev: String,
 }
 
 pub async fn proc(cmd: Command, repo: &Repo, view: &View) -> anyhow::Result<()> {
-    let Command { author, ts, inner } = cmd;
+    let Command { ts, author, inner } = cmd;
     match inner {
         CommandInner::Commit(CmdCommit { comment, branch, prev, rev }) => {
             let prev = Hash::from_hex(prev)?;
@@ -72,7 +78,13 @@ pub async fn proc(cmd: Command, repo: &Repo, view: &View) -> anyhow::Result<()> 
             repo.add_commit(hash, &blob)?;
             println!("{:?}", view.add_commit(hash, bson::to_document(&commit_doc)?).await?);
             repo.update_ref(&branch, hash)?;
-        }
+        },
+        CommandInner::CreateBranch(CmdCreateBranch { prev }) => {
+            let prev = Hash::from_hex(prev)?;
+            let branch = Branch::Common { ts, author }.to_string();
+            repo.create_ref(&branch, prev)?;
+            view.create_ref(&branch, prev).await?;
+        },
     }
     Ok(())
 }

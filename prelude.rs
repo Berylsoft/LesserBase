@@ -15,6 +15,13 @@ pub fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis().try_into().unwrap()
 }
 
+pub fn as_one_char(s: &str) -> char {
+    let mut iter = s.chars();
+    let elem = iter.next().unwrap();
+    assert!(matches!(iter.next(), None));
+    elem
+}
+
 pub fn is_file_not_found(err: &io::Error) -> bool {
     if let io::ErrorKind::NotFound = err.kind() { true } else { false }
 }
@@ -26,27 +33,25 @@ pub fn file_detected(path: &Path) -> io::Result<bool> {
     }
 }
 
+pub const BSON_BIN_TYPE_GENERIC: bson::spec::BinarySubtype = bson::spec::BinarySubtype::Generic;
+
 pub fn hash_to_bson_bin(hash: Hash) -> bson::Binary {
-    bson::Binary { subtype: bson::spec::BinarySubtype::Generic, bytes: hash.as_bytes().to_vec() }
+    bson::Binary { subtype: BSON_BIN_TYPE_GENERIC, bytes: hash.as_bytes().to_vec() }
 }
 
 pub fn bson_bin_to_hash(raw: bson::Binary) -> Hash {
-    let inner: HashInner = raw.bytes.try_into().unwrap();
+    let bson::Binary { bytes, subtype } = raw;
+    debug_assert_eq!(subtype, BSON_BIN_TYPE_GENERIC);
+    let inner: HashInner = bytes.try_into().unwrap();
     Hash::from(inner)
 }
 
-pub fn as_one_char(s: &str) -> char {
-    let mut iter = s.chars();
-    let elem = iter.next().unwrap();
-    assert!(matches!(iter.next(), None));
-    elem
+pub fn bson_to_hash(bson: Bson) -> anyhow::Result<Hash> {
+    if let Bson::Binary(raw) = bson { Ok(bson_bin_to_hash(raw)) } else { Err(anyhow::anyhow!("bson_to_bin failed")) }
 }
 
 pub fn bson_to_doc(bson: Bson) -> anyhow::Result<BsonDocument> {
-    match bson {
-        Bson::Document(doc) => Ok(doc),
-        _ => Err(anyhow::anyhow!("bson_to_doc failed")),
-    }
+    if let Bson::Document(doc) = bson { Ok(doc) } else { Err(anyhow::anyhow!("bson_to_doc failed")) }
 }
 
 pub fn json_to_string(json: Json) -> anyhow::Result<String> {
