@@ -3,10 +3,12 @@
 pub const VERSION: &str = "0.1-alpha";
 
 pub mod prelude;
-pub mod local;
-pub mod commit;
+pub mod model;
+
+pub mod fs;
+pub mod db;
+
 pub mod schema;
-pub mod state;
-pub mod view;
+
 pub mod command;
 pub mod executor;

@@ -1,9 +1,9 @@
-use crate::{prelude::*, commit::*};
+use crate::{prelude::*, model::*};
 use mongodb::{Client, Database, Collection};
 
 type LooseTypedCollection = Collection<BsonDocument>;
 
-pub struct View {
+pub struct Db {
     conn: Client,
     db_vcs: Database,
     db_latest: Database,
@@ -44,13 +44,13 @@ async fn get_doc_content_by_hash_id(coll: &LooseTypedCollection, hash: Hash) -> 
     Ok(get_content_by_hash_id_inner(coll, hash).await?.get_document("content")?.to_owned())
 }
 
-impl View {
-    pub async fn new(uri: &str) -> anyhow::Result<View> {
+impl Db {
+    pub async fn new(uri: &str) -> anyhow::Result<Db> {
         let conn = Client::with_uri_str(uri).await?;
         let db_vcs = conn.database("vcs");
         let db_latest = conn.database("latest");
 
-        Ok(View {
+        Ok(Db {
             coll_vcs_objects_data: db_vcs.collection("objects-data"),
             coll_vcs_objects_page: db_vcs.collection("objects-page"),
             coll_vcs_commits: db_vcs.collection("commits"),

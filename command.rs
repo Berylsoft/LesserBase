@@ -1,4 +1,4 @@
-use crate::{prelude::*, commit::*};
+use crate::{prelude::*, model::*};
 
 pub trait Request {
     type Response;

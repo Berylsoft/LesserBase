@@ -1,22 +1,20 @@
-use crate::{prelude::*, commit::*, command::*, local::Repo, state::State, view::View};
+use crate::{prelude::*, model::*, command::*, fs::Repo, db::Db};
 
 pub struct Context {
     repo: Repo,
-    state: State,
-    view: View,
+    db: Db,
 }
 
 impl Context {
-    pub async fn init(path: PathBuf, state_uri: &str, view_uri: &str) -> anyhow::Result<Context> {
+    pub async fn init(path: PathBuf, db_uri: &str) -> anyhow::Result<Context> {
         let repo = Repo::new(path)?;
         repo.init()?;
-        let state = State::new(&state_uri).await?;
-        let view = View::new(&view_uri).await?;
-        Ok(Context { repo, state, view })
+        let db = Db::new(db_uri).await?;
+        Ok(Context { repo, db })
     }
 
-    pub async fn exec(&mut self, cmd: Command) -> anyhow::Result<()> {
-        let Context { repo, state, view } = self;
+    pub async fn exec(&self, cmd: Command) -> anyhow::Result<()> {
+        let Context { repo, db } = self;
         let Command { ts, author, inner } = cmd;
         match inner {
             CommandInner::Commit(CCommit { comment, branch, prev, rev }) => {
@@ -35,7 +33,7 @@ impl Context {
                             let blob = bson::to_vec(&content)?;
                             let hash = hash_all(&blob);
                             repo.add_data_object(hash, &blob)?;
-                            view.add_data_object(hash, content).await?;
+                            db.add_data_object(hash, content).await?;
                             hash
                         },
                         ObjectKind::Page => {
@@ -43,7 +41,7 @@ impl Context {
                             let blob = content.as_bytes();
                             let hash = hash_all(blob);
                             repo.add_page_object(hash, blob)?;
-                            view.add_page_object(hash, content).await?;
+                            db.add_page_object(hash, content).await?;
                             hash
                         },
                     };
@@ -55,14 +53,14 @@ impl Context {
                 let hash = hash_all(&blob);
                 repo.add_commit(hash, &blob)?;
                 repo.update_ref(&branch, hash)?;
-                view.add_commit(hash, bson::to_document(&commit_doc)?).await?;
-                view.update_ref(&branch, hash).await?;
+                db.add_commit(hash, bson::to_document(&commit_doc)?).await?;
+                db.update_ref(&branch, hash).await?;
             },
             CommandInner::CreateCommonBranch(CCreateCommonBranch { prev }) => {
                 let prev = Hash::from_hex(prev)?;
                 let branch = Branch::Common(CommonBranch { ts, author });
                 repo.create_ref(&branch, prev)?;
-                view.create_ref(&branch, prev).await?;
+                db.create_ref(&branch, prev).await?;
             },
             CommandInner::MergeCommonBranchToMain(CMergeCommonBranchToMain { branch, comment }) => {
                 // TODO prem check
@@ -80,9 +78,9 @@ impl Context {
                 repo.add_commit(hash, &blob)?;
                 repo.update_ref(&branch, hash)?;
                 repo.update_ref(&Main, hash)?;
-                view.add_commit(hash, bson::to_document(&commit_doc)?).await?;
-                view.update_ref(&branch, hash).await?;
-                view.update_ref(&Main, hash).await?;
+                db.add_commit(hash, bson::to_document(&commit_doc)?).await?;
+                db.update_ref(&branch, hash).await?;
+                db.update_ref(&Main, hash).await?;
             }
         }
         Ok(())
