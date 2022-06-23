@@ -1,7 +1,7 @@
-pub use std::{path::{Path, PathBuf}, fs::{self, OpenOptions}, io::{self, Read, Write, Seek}};
+pub use std::{path::{Path, PathBuf}, fs::{self, OpenOptions}, io::{self, Read, Write, Seek}, collections::HashMap};
 pub use serde::{Serialize, Deserialize};
 pub use serde_json::{Value as Json, json};
-pub use bson::{Bson, Document as BsonDocument, bson, doc as bson_doc};
+pub use bson::{Bson, Document as BsonDocument, bson, doc as bson_doc, Binary as BsonBinary};
 pub use blake3::{Hash, OUT_LEN as HASH_LEN, hash as hash_all};
 
 pub use crate::VERSION;
@@ -35,12 +35,12 @@ pub fn file_detected(path: &Path) -> io::Result<bool> {
 
 pub const BSON_BIN_TYPE_GENERIC: bson::spec::BinarySubtype = bson::spec::BinarySubtype::Generic;
 
-pub fn hash_to_bson_bin(hash: Hash) -> bson::Binary {
-    bson::Binary { subtype: BSON_BIN_TYPE_GENERIC, bytes: hash.as_bytes().to_vec() }
+pub fn hash_to_bson_bin(hash: Hash) -> BsonBinary {
+    BsonBinary { subtype: BSON_BIN_TYPE_GENERIC, bytes: hash.as_bytes().to_vec() }
 }
 
-pub fn bson_bin_to_hash(raw: bson::Binary) -> Hash {
-    let bson::Binary { bytes, subtype } = raw;
+pub fn bson_bin_to_hash(raw: BsonBinary) -> Hash {
+    let BsonBinary { bytes, subtype } = raw;
     debug_assert_eq!(subtype, BSON_BIN_TYPE_GENERIC);
     let inner: HashInner = bytes.try_into().unwrap();
     Hash::from(inner)

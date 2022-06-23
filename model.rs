@@ -4,7 +4,7 @@ use num_enum::{TryFromPrimitive, IntoPrimitive};
 const OBJECT_KIND_DATA_STR: &'static str = "data";
 const OBJECT_KIND_PAGE_STR: &'static str = "page";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Commit {
     pub prev: Hash,
     pub ts: u64,
@@ -14,7 +14,7 @@ pub struct Commit {
     pub rev: Vec<Rev>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Rev {
     pub kind: RevKind,
     pub hash: Hash,
@@ -22,7 +22,7 @@ pub struct Rev {
     pub path: String,
 }
 
-#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[derive(Debug, Clone, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
 pub enum ObjectKind {
     Data,
@@ -38,18 +38,51 @@ impl ObjectKind {
     }
 }
 
-#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[derive(Debug, Clone, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
 pub enum RevKind {
     Update,
     Remove,
 }
 
-// region: serde helper
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum Branch {
+    Main,
+    Common(CommonBranch),
+}
+
+pub use Branch::Main;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommonBranch {
+    pub ts: u64,
+    pub author: String,
+}
+
+impl Branch {
+    pub fn to_string(&self) -> String {
+        match self {
+            Branch::Main => "main".to_owned(),
+            Branch::Common(CommonBranch { ts, author }) => format!("{}-{}", ts, author),
+        }
+    }
+}
+
+pub type StateMap = HashMap<String, Hash>;
+
+#[derive(Debug, Clone)]
+pub struct State {
+    pub commit: Hash,
+    pub data: StateMap,
+    pub page: StateMap,
+}
+
+// region: boilerplate code for serializing convert
 
 #[derive(Serialize, Deserialize)]
 pub struct CommitDocument {
-    pub prev: bson::Binary,
+    pub prev: BsonBinary,
     pub ts: u64,
     pub author: String,
     pub comment: String,
@@ -60,7 +93,7 @@ pub struct CommitDocument {
 #[derive(Serialize, Deserialize)]
 pub struct RevDocument {
     pub kind: u8,
-    pub hash: bson::Binary,
+    pub hash: BsonBinary,
     pub object_kind: u8,
     pub path: String,
 }
@@ -101,34 +134,45 @@ impl From<CommitDocument> for Commit {
     }
 }
 
+pub type StateDocumentMap = HashMap<String, BsonBinary>;
+
+#[derive(Serialize, Deserialize)]
+pub struct StateDocument {
+    pub _id: BsonBinary,
+    pub data: StateDocumentMap,
+    pub page: StateDocumentMap,
+}
+
+fn state_map_to_doc(map: StateMap) -> StateDocumentMap {
+    let mut map2 = HashMap::new();
+    for (path, hash) in map.into_iter() {
+        let result = map2.insert(path, hash_to_bson_bin(hash));
+        debug_assert!(matches!(result, None));
+    }
+    map2
+}
+
+fn state_map_from_doc(map: StateDocumentMap) -> StateMap {
+    let mut map2 = HashMap::new();
+    for (path, hash) in map.into_iter() {
+        let result = map2.insert(path, bson_bin_to_hash(hash));
+        debug_assert!(matches!(result, None));
+    }
+    map2
+}
+
+impl From<State> for StateDocument {
+    fn from(state: State) -> StateDocument {
+        let State { commit, data, page } = state;
+        StateDocument { _id: hash_to_bson_bin(commit), data: state_map_to_doc(data), page: state_map_to_doc(page) }
+    }
+}
+
+impl From<StateDocument> for State {
+    fn from(state: StateDocument) -> State {
+        let StateDocument { _id, data, page } = state;
+        State { commit: bson_bin_to_hash(_id), data: state_map_from_doc(data), page: state_map_from_doc(page) }
+    }
+}
+
 // endregion
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum Branch {
-    Main,
-    Common(CommonBranch),
-}
-
-pub use Branch::Main;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommonBranch {
-    pub ts: u64,
-    pub author: String,
-}
-
-impl Branch {
-    pub fn to_string(&self) -> String {
-        match self {
-            Branch::Main => "main".to_owned(),
-            Branch::Common(b) => b.to_string(),
-        }
-    }
-}
-
-impl CommonBranch {
-    pub fn to_string(&self) -> String {
-        format!("{}-{}", self.ts, self.author)
-    }
-}
