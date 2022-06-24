@@ -78,6 +78,12 @@ pub struct State {
     pub page: StateMap,
 }
 
+impl State {
+    pub fn empty() -> State {
+        State { commit: Hash::from(EMPTY_HASH), data: HashMap::new(), page: HashMap::new() }
+    }
+}
+
 // region: boilerplate code for serializing convert
 
 #[derive(Serialize, Deserialize)]

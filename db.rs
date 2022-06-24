@@ -43,6 +43,29 @@ async fn get_doc_content_by_hash_id(coll: &LooseTypedCollection, hash: Hash) -> 
     Ok(get_content_by_hash_id_inner(coll, hash).await?.get_document("content")?.to_owned())
 }
 
+async fn insert_latest_by_path(coll: &LooseTypedCollection, path: String, mut content: BsonDocument) -> anyhow::Result<()> {
+    let query = bson_doc! { "_id": &path };
+    let count = coll.count_documents(query.clone(), None).await?;
+    if count == 0 {
+        let _ = content.insert("id", &path);
+        let result = coll.insert_one(content, None).await?;
+        debug_assert_eq!(&path, result.inserted_id.as_str().unwrap());
+    } else if count == 1 {
+        let result = coll.replace_one(query, content, None).await?;
+        debug_assert_eq!(&path, result.upserted_id.unwrap().as_str().unwrap());
+    } else {
+        panic!()
+    }
+    Ok(())
+}
+
+async fn delete_latest_by_path(coll: &LooseTypedCollection, path: String) -> anyhow::Result<()> {
+    let query = bson_doc! { "_id": &path };
+    let result = coll.delete_one(query, None).await?;
+    assert_eq!(result.deleted_count, 1);
+    Ok(())
+}
+
 impl Db {
     pub async fn new(uri: &str) -> anyhow::Result<Db> {
         let conn = Client::with_uri_str(uri).await?;
@@ -62,6 +85,7 @@ impl Db {
     }
 
     pub async fn create_ref(&self, branch: &Branch, hash: Hash) -> anyhow::Result<()> {
+        let coll = &self.coll_vcs_refs;
         let branch = branch.to_string();
         let doc = bson_doc! {
             "_id": &branch,
@@ -69,12 +93,13 @@ impl Db {
                 hash_to_bson_bin(hash),
             ],
         };
-        let result = self.coll_vcs_refs.insert_one(doc, None).await?;
+        let result = coll.insert_one(doc, None).await?;
         debug_assert_eq!(branch, result.inserted_id.as_str().unwrap());
         Ok(())
     }
 
     pub async fn update_ref(&self, branch: &Branch, hash: Hash) -> anyhow::Result<()> {
+        let coll = &self.coll_vcs_refs;
         let branch = branch.to_string();
         let query = bson_doc! { "_id": &branch };
         let update = bson_doc! {
@@ -82,7 +107,7 @@ impl Db {
                 "hashes": hash_to_bson_bin(hash),
             },
         };
-        let result = self.coll_vcs_refs.update_one(query, update, None).await?;
+        let result = coll.update_one(query, update, None).await?;
         debug_assert_eq!(branch, result.upserted_id.unwrap().as_str().unwrap());
         debug_assert_eq!(1, result.matched_count);
         debug_assert_eq!(1, result.modified_count);
@@ -90,9 +115,10 @@ impl Db {
     }
 
     pub async fn get_ref(&self, branch: &Branch) -> anyhow::Result<Hash> {
+        let coll = &self.coll_vcs_refs;
         let branch = branch.to_string();
         let query = bson_doc! { "_id": &branch };
-        let result = self.coll_vcs_refs.find_one(query, None).await?.expect("not found");
+        let result = coll.find_one(query, None).await?.expect("not found");
         debug_assert_eq!(result.get_str("_id")?, branch);
         Ok(bson_to_hash(result.get_array("hashes")?.last().unwrap().clone())?)
     }
@@ -127,41 +153,44 @@ impl Db {
         get_doc_content_by_hash_id(&self.coll_vcs_commits, hash).await
     }
 
+    #[inline]
     pub async fn update_page(&self, path: String, content: String) -> anyhow::Result<()> {
-        let doc = bson_doc! {
-            "_id": &path,
-            "content": content,
-        };
-        let query = bson_doc! { "_id": &path };
-        let count = self.coll_latest_page.count_documents(query.clone(), None).await?;
-        if count == 0 {
-            let result = self.coll_latest_page.insert_one(doc, None).await?;
-            debug_assert_eq!(&path, result.inserted_id.as_str().unwrap());
-        } else if count == 1 {
-            let result = self.coll_latest_page.replace_one(query, doc, None).await?;
-            debug_assert_eq!(&path, result.upserted_id.unwrap().as_str().unwrap());
-        } else {
-            panic!()
-        }
-        Ok(())
+        insert_latest_by_path(&self.coll_latest_page, path, bson_doc! { "content": content }).await
     }
 
+    #[inline]
     pub async fn update_data(&self, path: String, content: BsonDocument) -> anyhow::Result<()> {
-        Ok(())
+        insert_latest_by_path(&self.coll_latest_data, path, content).await
+    }
+
+    #[inline]
+    pub async fn remove_page(&self, path: String) -> anyhow::Result<()> {
+        delete_latest_by_path(&self.coll_latest_page, path).await
+    }
+
+    #[inline]
+    pub async fn remove_data(&self, path: String) -> anyhow::Result<()> {
+        delete_latest_by_path(&self.coll_latest_data, path).await
     }
 
     pub async fn add_state(&self, hash: Hash, state: State) -> anyhow::Result<()> {
+        let coll = &self.coll_vcs_states;
         let state_doc = StateDocument::from(state);
-        let result = self.coll_vcs_states.insert_one(bson::to_document(&state_doc)?, None).await?;
+        let result = coll.insert_one(bson::to_document(&state_doc)?, None).await?;
         debug_assert_eq!(hash, bson_to_hash(result.inserted_id)?);
         Ok(())
     }
 
     pub async fn get_state(&self, hash: Hash) -> anyhow::Result<State> {
-        let query = bson_doc! { "_id": hash_to_bson_bin(hash) };
-        let result = self.coll_vcs_states.find_one(query, None).await?.expect("not found");
-        debug_assert_eq!(result.get_binary_generic("_id")?, hash.as_bytes());
-        let state_doc: StateDocument = bson::from_document(result)?;
-        Ok(State::from(state_doc))
+        let coll = &self.coll_vcs_states;
+        if hash != Hash::from(EMPTY_HASH) {
+            Ok(State::empty())
+        } else {
+            let query = bson_doc! { "_id": hash_to_bson_bin(hash) };
+            let result = coll.find_one(query, None).await?.expect("not found");
+            debug_assert_eq!(result.get_binary_generic("_id")?, hash.as_bytes());
+            let state_doc: StateDocument = bson::from_document(result)?;
+            Ok(State::from(state_doc))
+        }
     }
 }
