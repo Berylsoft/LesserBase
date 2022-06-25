@@ -29,15 +29,15 @@ impl PathBuilder {
     }
 
     fn data_object(&self, hash: Hash) -> PathBuf {
-        self.data_objects.join(hash.to_hex().as_str())
+        self.data_objects.join(hash_to_hex(hash).as_ref())
     }
 
     fn page_object(&self, hash: Hash) -> PathBuf {
-        self.page_objects.join(hash.to_hex().as_str())
+        self.page_objects.join(hash_to_hex(hash).as_ref())
     }
 
     fn commit(&self, hash: Hash) -> PathBuf {
-        self.commits.join(hash.to_hex().as_str())
+        self.commits.join(hash_to_hex(hash).as_ref())
     }
 
     fn aref(&self, branch: &Branch) -> PathBuf {
@@ -85,14 +85,14 @@ impl Repo {
             fs::create_dir_all(self.path.page_objects())?;
             fs::create_dir_all(self.path.commits())?;
             fs::create_dir_all(self.path.refs())?;
-            self.update_ref(&Main, Hash::from(EMPTY_HASH))?;
+            self.update_ref(&Main, EMPTY_HASH)?;
         }
         Ok(())
     }
 
     pub fn create_ref(&self, branch: &Branch, hash: Hash) -> io::Result<()> {
         let mut file = OpenOptions::new().create_new(true).write(true).open(self.path.aref(branch))?;
-        file.write(hash.to_hex().as_bytes())?;
+        file.write(hash_to_hex(hash).as_bytes())?;
         file.write(b"\n")?;
         file.flush()?;
         Ok(())
@@ -100,7 +100,7 @@ impl Repo {
 
     pub fn update_ref(&self, branch: &Branch, hash: Hash) -> io::Result<()> {
         let mut file = OpenOptions::new().create(true).append(true).open(self.path.aref(branch))?;
-        file.write(hash.to_hex().as_bytes())?;
+        file.write(hash_to_hex(hash).as_bytes())?;
         file.write(b"\n")?;
         file.flush()?;
         Ok(())
@@ -112,14 +112,14 @@ impl Repo {
         let mut buf = String::new();
         file.read_to_string(&mut buf)?;
         assert_eq!(buf.len(), HASH_LEN * 2 + 1);
-        Ok(Hash::from_hex(&buf[0..HASH_LEN * 2])?)
+        Ok(hex_to_hash(&buf[0..HASH_LEN * 2])?)
     }
 
     pub fn get_root_ref(&self, branch: &Branch) -> anyhow::Result<Hash> {
         let mut file = OpenOptions::new().read(true).open(self.path.aref(branch))?;
         let mut buf = [0u8; HASH_LEN * 2];
         file.read(&mut buf)?;
-        Ok(Hash::from_hex(&buf)?)
+        Ok(hex_to_hash(&buf)?)
     }
 
     pub fn get_all_ref(&self, branch: &Branch) -> anyhow::Result<Vec<Hash>> {
@@ -128,7 +128,7 @@ impl Repo {
         file.read_to_string(&mut buf)?;
         let mut result = Vec::new();
         for h in buf.split('\n') {
-            result.push(Hash::from_hex(h)?)
+            result.push(hex_to_hash(h)?)
         }
         Ok(result)
     }
@@ -162,7 +162,6 @@ impl Repo {
 
     pub fn get_commit(&self, hash: Hash) -> anyhow::Result<Commit> {
         let file = OpenOptions::new().read(true).open(self.path.commit(hash))?;
-        let doc: CommitDocument = bson::from_reader(file)?;
-        Ok(Commit::from(doc))
+        Ok(bson::from_reader(file)?)
     }
 }

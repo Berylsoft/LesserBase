@@ -29,7 +29,7 @@ async fn insert_content_by_hash_id(coll: &LooseTypedCollection, hash: Hash, cont
 async fn get_content_by_hash_id_inner(coll: &LooseTypedCollection, hash: Hash) -> anyhow::Result<BsonDocument> {
     let query = bson_doc! { "_id": hash_to_bson_bin(hash) };
     let result = coll.find_one(query, None).await?.expect("not found");
-    debug_assert_eq!(result.get_binary_generic("_id")?, hash.as_bytes());
+    debug_assert_eq!(result.get_binary_generic("_id")?, hash.as_slice());
     Ok(result)
 }
 
@@ -144,8 +144,8 @@ impl Db {
     }
 
     #[inline]
-    pub async fn add_commit(&self, hash: Hash, content: CommitDocument) -> anyhow::Result<()> {
-        insert_content_by_hash_id(&self.coll_vcs_commits, hash, bson::to_bson(&content)?).await
+    pub async fn add_commit(&self, hash: Hash, content: &Commit) -> anyhow::Result<()> {
+        insert_content_by_hash_id(&self.coll_vcs_commits, hash, bson::to_bson(content)?).await
     }
 
     #[inline]
@@ -175,22 +175,23 @@ impl Db {
 
     pub async fn add_state(&self, hash: Hash, state: State) -> anyhow::Result<()> {
         let coll = &self.coll_vcs_states;
-        let state_doc = StateDocument::from(state);
-        let result = coll.insert_one(bson::to_document(&state_doc)?, None).await?;
+        let mut doc = bson::to_document(&state)?;
+        doc.insert("_id", hash_to_bson_bin(hash));
+        let result = coll.insert_one(doc, None).await?;
         debug_assert_eq!(hash, bson_to_hash(result.inserted_id)?);
         Ok(())
     }
 
     pub async fn get_state(&self, hash: Hash) -> anyhow::Result<State> {
         let coll = &self.coll_vcs_states;
-        if hash != Hash::from(EMPTY_HASH) {
+        if hash != EMPTY_HASH {
             Ok(State::empty())
         } else {
             let query = bson_doc! { "_id": hash_to_bson_bin(hash) };
-            let result = coll.find_one(query, None).await?.expect("not found");
-            debug_assert_eq!(result.get_binary_generic("_id")?, hash.as_bytes());
-            let state_doc: StateDocument = bson::from_document(result)?;
-            Ok(State::from(state_doc))
+            let mut result = coll.find_one(query, None).await?.expect("not found");
+            debug_assert_eq!(result.get_binary_generic("_id")?, hash.as_slice());
+            result.remove("_id");
+            Ok(bson::from_document(result)?)
         }
     }
 }

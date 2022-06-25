@@ -2,13 +2,9 @@ pub use std::{path::{Path, PathBuf}, fs::{self, OpenOptions}, io::{self, Read, W
 pub use serde::{Serialize, Deserialize};
 pub use serde_json::{Value as Json, json};
 pub use bson::{Bson, Document as BsonDocument, bson, doc as bson_doc, Binary as BsonBinary};
-pub use blake3::{Hash, OUT_LEN as HASH_LEN, hash as hash_all};
+pub use blake3::OUT_LEN as HASH_LEN;
 
 pub use crate::VERSION;
-
-pub type HashInner = [u8; HASH_LEN];
-pub const EMPTY_HASH: HashInner = [0u8; HASH_LEN];
-pub const HASH_LEN_I64: i64 = HASH_LEN as i64;
 
 pub fn now() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,6 +18,22 @@ pub fn as_one_char(s: &str) -> char {
     elem
 }
 
+pub type Hash = [u8; HASH_LEN];
+pub const EMPTY_HASH: Hash = [0u8; HASH_LEN];
+pub const HASH_LEN_I64: i64 = HASH_LEN as i64;
+
+pub fn hash_all(input: &[u8]) -> Hash {
+    *blake3::hash(input).as_bytes()
+}
+
+pub fn hash_to_hex<'a>(hash: Hash) -> Box<str> {
+    Box::from(blake3::Hash::from(hash).to_hex().as_str())
+}
+
+pub fn hex_to_hash<B: AsRef<[u8]>>(hex: B) -> Result<Hash, blake3::HexError> {
+    Ok(*blake3::Hash::from_hex(hex)?.as_bytes())
+}
+
 pub fn is_file_not_found(err: &io::Error) -> bool {
     if let io::ErrorKind::NotFound = err.kind() { true } else { false }
 }
@@ -33,17 +45,14 @@ pub fn file_detected(path: &Path) -> io::Result<bool> {
     }
 }
 
-pub const BSON_BIN_TYPE_GENERIC: bson::spec::BinarySubtype = bson::spec::BinarySubtype::Generic;
-
 pub fn hash_to_bson_bin(hash: Hash) -> BsonBinary {
-    BsonBinary { subtype: BSON_BIN_TYPE_GENERIC, bytes: hash.as_bytes().to_vec() }
+    BsonBinary { subtype: bson::spec::BinarySubtype::Generic, bytes: hash.to_vec() }
 }
 
 pub fn bson_bin_to_hash(raw: BsonBinary) -> Hash {
     let BsonBinary { bytes, subtype } = raw;
-    debug_assert_eq!(subtype, BSON_BIN_TYPE_GENERIC);
-    let inner: HashInner = bytes.try_into().unwrap();
-    Hash::from(inner)
+    debug_assert_eq!(subtype, bson::spec::BinarySubtype::Generic);
+    bytes.try_into().unwrap()
 }
 
 pub fn bson_to_hash(bson: Bson) -> anyhow::Result<Hash> {

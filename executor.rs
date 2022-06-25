@@ -1,5 +1,20 @@
 use crate::{prelude::*, model::*, command::*, fs::Repo, db::Db};
 
+impl State {
+    pub fn update(&mut self, rev: Vec<Rev>) {
+        for Rev { inner, object_kind, path } in rev {
+            let dest = match object_kind {
+                ObjectKind::Data => &mut self.data,
+                ObjectKind::Page => &mut self.page,
+            };
+            let _ = match inner {
+                RevInner::Update { hash } => dest.insert(path, hash),
+                RevInner::Remove => dest.remove(&path),
+            };
+        }
+    }
+}
+
 pub struct Context {
     repo: Repo,
     db: Db,
@@ -51,58 +66,54 @@ impl Context {
     pub async fn commit(&self, commit: Commit, branches: Vec<&Branch>) -> anyhow::Result<()> {
         let Context { repo, db } = self;
 
-        let commit_doc = CommitDocument::from(commit.clone());
-        let blob = bson::to_vec(&commit_doc)?;
+        let blob = bson::to_vec(&commit)?;
         let hash = hash_all(&blob);
 
         repo.add_commit(hash, &blob)?;
-        db.add_commit(hash, commit_doc).await?;
+        db.add_commit(hash, &commit).await?;
 
         for branch in branches {
             repo.update_ref(branch, hash)?;
             db.update_ref(branch, hash).await?;
         }
 
-        let State { mut data, mut page, .. } = db.get_state(commit.prev).await?;
-        for r in commit.rev {
-            match r.kind {
-                RevKind::Update => match r.object_kind {
-                    ObjectKind::Data => { let _ = data.insert(r.path, r.hash); },
-                    ObjectKind::Page => { let _ = page.insert(r.path, r.hash); },
-                },
-                RevKind::Remove => match r.object_kind {
-                    ObjectKind::Data => { let _ = data.remove(&r.path); },
-                    ObjectKind::Page => { let _ = page.remove(&r.path); },
-                },
-            }
-        }
-        db.add_state(hash, State { commit: hash, data, page }).await?;
+        let mut state = db.get_state(commit.prev).await?;
+        state.update(commit.rev);
+        db.add_state(hash, state).await?;
 
         Ok(())
     }
 
     pub async fn exec(&self, cmd: Command) -> anyhow::Result<()> {
-        let Context { repo, db } = self;
+        let Context { repo, .. } = self;
         let Command { ts, author, inner } = cmd;
         match inner {
             CommandInner::Commit(CCommit { comment, branch, prev, rev: _rev }) => {
                 // TODO prem check
-                let prev = Hash::from_hex(prev)?;
+                let prev = hex_to_hash(prev)?;
                 assert_eq!(repo.get_ref(&branch)?, prev);
                 let mut rev = Vec::new();
                 for CRev { kind, object_kind, path, content } in _rev {
-                    let kind = kind.try_into()?;
-                    let object_kind = object_kind.try_into()?;
-                    let hash = match object_kind {
-                        ObjectKind::Data => self.add_data_object(bson_to_doc(Bson::try_from(content)?)?).await?,
-                        ObjectKind::Page => self.add_page_object(json_to_string(content)?).await?,
+                    let inner = match kind {
+                        RevKind::Update => {
+                            let content = content.unwrap();
+                            let hash = match object_kind {
+                                ObjectKind::Data => self.add_data_object(bson_to_doc(Bson::try_from(content)?)?).await?,
+                                ObjectKind::Page => self.add_page_object(json_to_string(content)?).await?,
+                            };
+                            RevInner::Update { hash }
+                        },
+                        RevKind::Remove => {
+                            assert!(matches!(content, None));
+                            RevInner::Remove
+                        },
                     };
-                    rev.push(Rev { kind, hash, object_kind, path });
+                    rev.push(Rev { inner, object_kind, path });
                 }
                 self.commit(Commit { prev, ts, author, comment, merge: None, rev }, vec![&branch]).await?;
             },
             CommandInner::CreateCommonBranch(CCreateCommonBranch { prev }) => {
-                self.create_branch(Hash::from_hex(prev)?, &Branch::Common(CommonBranch { ts, author })).await?;
+                self.create_branch(hex_to_hash(prev)?, &Branch::Common(CommonBranch { ts, author })).await?;
             },
             CommandInner::MergeCommonBranchToMain(CMergeCommonBranchToMain { branch, comment }) => {
                 // TODO prem check
@@ -115,7 +126,7 @@ impl Context {
                     // 3-way
                     unimplemented!()
                 };
-                self.commit(commit, vec![&Main, &branch]).await?;
+                self.commit(commit, vec![&Main]).await?;
             }
         }
         Ok(())

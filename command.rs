@@ -29,10 +29,10 @@ pub struct CCommit {
 
 #[derive(Debug, Deserialize)]
 pub struct CRev {
-    pub kind: u8,
-    pub object_kind: u8,
+    pub kind: RevKind,
+    pub object_kind: ObjectKind,
     pub path: String,
-    pub content: Json,
+    pub content: Option<Json>,
 }
 
 #[derive(Debug, Deserialize)]
