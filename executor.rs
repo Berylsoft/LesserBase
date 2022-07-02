@@ -25,6 +25,7 @@ impl Context {
         let repo = Repo::new(path)?;
         repo.init()?;
         let db = Db::new(db_uri).await?;
+        db.init().await?;
         Ok(Context { repo, db })
     }
 
@@ -88,12 +89,12 @@ impl Context {
         let Context { repo, .. } = self;
         let Command { ts, author, inner } = cmd;
         match inner {
-            CommandInner::Commit(CCommit { comment, branch, prev, rev: _rev }) => {
+            CommandInner::Commit(CCommit { comment, branch, prev, rev: crev }) => {
                 // TODO prem check
                 let prev = hex_to_hash(prev)?;
                 assert_eq!(repo.get_ref(&branch)?, prev);
                 let mut rev = Vec::new();
-                for CRev { kind, object_kind, path, content } in _rev {
+                for CRev { kind, object_kind, path, content } in crev {
                     let inner = match kind {
                         RevKind::Update => {
                             let content = content.unwrap();

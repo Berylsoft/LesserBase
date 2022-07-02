@@ -12,7 +12,7 @@ pub struct Command {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type", content = "inner")]
+#[serde(tag = "kind", content = "inner")]
 pub enum CommandInner {
     Commit(CCommit),
     CreateCommonBranch(CCreateCommonBranch),

@@ -78,7 +78,7 @@ impl Repo {
         }
     }
 
-    pub fn init(&self) -> anyhow::Result<()> {
+    pub fn init(&self) -> io::Result<()> {
         if !file_detected(&self.path.aref(&Main))? {
             println!("{:?}", self.path.data_objects());
             fs::create_dir_all(self.path.data_objects())?;

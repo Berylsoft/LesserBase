@@ -5,6 +5,7 @@ const OBJECT_KIND_PAGE_STR: &'static str = "page";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Commit {
+    #[serde(with = "serde_bytes")]
     pub prev: Hash,
     pub ts: u64,
     pub author: String,
@@ -41,6 +42,7 @@ impl ObjectKind {
 #[serde(rename_all = "kebab-case", tag = "kind")]
 pub enum RevInner {
     Update {
+        #[serde(with = "serde_bytes")]
         hash: Hash,
     },
     Remove,
