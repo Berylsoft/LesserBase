@@ -63,6 +63,15 @@ pub struct Repo {
     path: PathBuilder,
 }
 
+fn write_blob(path: PathBuf, blob: &[u8]) -> io::Result<()> {
+    // TODO: err: hash collision
+    let mut file = OpenOptions::new().create_new(true).write(true).open(path)?;
+    file.write_all(blob)?;
+    Ok(())
+}
+
+use fs::read as read_blob;
+
 impl Repo {
     pub fn new(path: PathBuf) -> anyhow::Result<Repo> {
         let path = PathBuilder::new(path);
@@ -133,35 +142,33 @@ impl Repo {
         Ok(result)
     }
 
+    #[inline]
     pub fn add_data_object(&self, hash: Hash, blob: &[u8]) -> io::Result<()> {
-        let mut file = OpenOptions::new().create_new(true).write(true).open(self.path.data_object(hash))?;
-        file.write_all(blob)?;
-        Ok(())
+        write_blob(self.path.data_object(hash), blob)
     }
 
+    #[inline]
     pub fn get_data_object(&self, hash: Hash) -> io::Result<Vec<u8>> {
-        fs::read(self.path.data_object(hash))
+        read_blob(self.path.data_object(hash))
     }
 
+    #[inline]
     pub fn add_page_object(&self, hash: Hash, blob: &[u8]) -> io::Result<()> {
-        let mut file = OpenOptions::new().create_new(true).write(true).open(self.path.page_object(hash))?;
-        file.write_all(blob)?;
-        Ok(())
+        write_blob(self.path.page_object(hash), blob)
     }
 
+    #[inline]
     pub fn get_page_object(&self, hash: Hash) -> io::Result<Vec<u8>> {
-        fs::read(self.path.page_object(hash))
+        read_blob(self.path.page_object(hash))
     }
 
-    pub fn add_commit(&self, hash: Hash, blob: &[u8]) -> anyhow::Result<Hash> {
-        // TODO: err: hash collision
-        let mut file = OpenOptions::new().create_new(true).write(true).open(self.path.commit(hash))?;
-        file.write_all(blob)?;
-        Ok(hash)
+    #[inline]
+    pub fn add_commit(&self, hash: Hash, blob: &[u8]) -> io::Result<()> {
+        write_blob(self.path.commit(hash), blob)
     }
 
+    #[inline]
     pub fn get_commit(&self, hash: Hash) -> anyhow::Result<Commit> {
-        let file = OpenOptions::new().read(true).open(self.path.commit(hash))?;
-        Ok(bson::from_reader(file)?)
+        Ok(bson::from_slice(&read_blob(self.path.commit(hash))?)?)
     }
 }

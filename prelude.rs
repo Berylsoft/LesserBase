@@ -26,7 +26,7 @@ pub fn hash_all(input: &[u8]) -> Hash {
     *blake3::hash(input).as_bytes()
 }
 
-pub fn hash_to_hex<'a>(hash: Hash) -> Box<str> {
+pub fn hash_to_hex(hash: Hash) -> Box<str> {
     Box::from(blake3::Hash::from(hash).to_hex().as_str())
 }
 
@@ -61,6 +61,10 @@ pub fn bson_to_hash(bson: Bson) -> anyhow::Result<Hash> {
 
 pub fn bson_to_doc(bson: Bson) -> anyhow::Result<BsonDocument> {
     if let Bson::Document(doc) = bson { Ok(doc) } else { Err(anyhow::anyhow!("bson_to_doc failed")) }
+}
+
+pub fn bson_to_string(bson: Bson) -> anyhow::Result<String> {
+    if let Bson::String(string) = bson { Ok(string) } else { Err(anyhow::anyhow!("bson_to_string failed")) }
 }
 
 pub fn json_to_string(json: Json) -> anyhow::Result<String> {
