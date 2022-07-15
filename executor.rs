@@ -29,12 +29,12 @@ impl Context {
         Ok(Context { repo, db })
     }
 
-    pub async fn add_data_object(&self, content: BsonDocument) -> anyhow::Result<Hash> {
+    pub async fn add_data_object(&self, content: Json) -> anyhow::Result<Hash> {
         let Context { repo, db } = self;
 
         // TODO schema check
 
-        let blob = bson::to_vec(&content)?;
+        let blob = msgpack_encode(json_to_msgpack(content.clone()))?;
         let hash = hash_all(&blob);
 
         repo.add_data_object(hash, &blob)?;
@@ -67,7 +67,7 @@ impl Context {
     pub async fn commit(&self, commit: Commit, branches: Vec<&Branch>) -> anyhow::Result<()> {
         let Context { repo, db } = self;
 
-        let blob = bson::to_vec(&commit)?;
+        let blob = rmp_serde::to_vec_named(&commit)?;
         let hash = hash_all(&blob);
 
         repo.add_commit(hash, &blob)?;
@@ -99,7 +99,7 @@ impl Context {
                         RevKind::Update => {
                             let content = content.unwrap();
                             let hash = match object_kind {
-                                ObjectKind::Data => self.add_data_object(bson_to_doc(Bson::try_from(content)?)?).await?,
+                                ObjectKind::Data => self.add_data_object(content).await?,
                                 ObjectKind::Page => self.add_page_object(json_to_string(content)?).await?,
                             };
                             RevInner::Update { hash }

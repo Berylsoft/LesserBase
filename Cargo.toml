@@ -28,6 +28,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_bytes = { git = "https://github.com/sgued/bytes", branch = "byte-array" }
 serde_json = "1.0"
 jsonschema = "0.16"
-bson = "2.3"
+rmp-serde = "1"
+rmpv = "1"
 toml = "0.5"
 mongodb = "2.2"

@@ -1,7 +1,7 @@
 pub use std::{path::{Path, PathBuf}, fs::{self, OpenOptions}, io::{self, Read, Write, Seek}, collections::HashMap};
 pub use serde::{Serialize, Deserialize};
-pub use serde_json::{Value as Json, json};
-pub use bson::{Bson, Document as BsonDocument, bson, doc as bson_doc, Binary as BsonBinary};
+pub use serde_json::{Value as Json, json, value::Number as JsonNumber};
+pub use rmpv::{Value as Msgpack, Integer as MsgpackInt};
 pub use blake3::OUT_LEN as HASH_LEN;
 
 pub use crate::VERSION;
@@ -45,26 +45,57 @@ pub fn file_detected(path: &Path) -> io::Result<bool> {
     }
 }
 
-pub fn hash_to_bson_bin(hash: Hash) -> BsonBinary {
-    BsonBinary { subtype: bson::spec::BinarySubtype::Generic, bytes: hash.to_vec() }
+pub fn msgpack_to_json(msgpack: Msgpack) -> Json {
+    match msgpack {
+        Msgpack::Nil => Json::Null,
+        Msgpack::Boolean(boolean) => Json::Bool(boolean),
+        Msgpack::String(may_string) => Json::String(may_string.into_str().unwrap()),
+        Msgpack::Integer(int) => {
+            if let Some(int) = int.as_u64() {
+                Json::Number(JsonNumber::from(int))
+            } else if let Some(int) = int.as_i64() {
+                Json::Number(JsonNumber::from(int))
+            } else {
+                unreachable!()
+            }
+        },
+        Msgpack::F32(float) => Json::Number(JsonNumber::from_f64(float.into()).unwrap()),
+        Msgpack::F64(float) => Json::Number(JsonNumber::from_f64(float).unwrap()),
+        Msgpack::Array(vec) => Json::Array(vec.into_iter().map(msgpack_to_json).collect()),
+        Msgpack::Map(map) => Json::Object(map.into_iter().map(|(k, v)| (k.try_into().unwrap(), msgpack_to_json(v))).collect()),
+        Msgpack::Binary(_) | Msgpack::Ext(_, _) => unreachable!(),
+    }
 }
 
-pub fn bson_bin_to_hash(raw: BsonBinary) -> Hash {
-    let BsonBinary { bytes, subtype } = raw;
-    debug_assert_eq!(subtype, bson::spec::BinarySubtype::Generic);
-    bytes.try_into().unwrap()
+pub fn json_to_msgpack(json: Json) -> Msgpack {
+    match json {
+        Json::Null => Msgpack::Nil,
+        Json::Bool(boolean) => Msgpack::Boolean(boolean),
+        Json::String(string) => Msgpack::String(string.into()),
+        Json::Number(number) => {
+            if let Some(number) = number.as_u64() {
+                Msgpack::Integer(MsgpackInt::from(number))
+            } else if let Some(number) = number.as_i64() {
+                Msgpack::Integer(MsgpackInt::from(number))
+            } else if let Some(number) = number.as_f64() {
+                Msgpack::F64(number)
+            } else {
+                unreachable!()
+            }
+        },
+        Json::Array(vec) => Msgpack::Array(vec.into_iter().map(json_to_msgpack).collect()),
+        Json::Object(map) => Msgpack::Map(map.into_iter().map(|(k, v)| (k.into(), json_to_msgpack(v))).collect()),
+    }
 }
 
-pub fn bson_to_hash(bson: Bson) -> anyhow::Result<Hash> {
-    if let Bson::Binary(raw) = bson { Ok(bson_bin_to_hash(raw)) } else { Err(anyhow::anyhow!("bson_to_bin failed")) }
+pub fn msgpack_encode(msgpack: Msgpack) -> anyhow::Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    rmpv::encode::write_value(&mut buf, &msgpack)?;
+    Ok(buf)
 }
 
-pub fn bson_to_doc(bson: Bson) -> anyhow::Result<BsonDocument> {
-    if let Bson::Document(doc) = bson { Ok(doc) } else { Err(anyhow::anyhow!("bson_to_doc failed")) }
-}
-
-pub fn bson_to_string(bson: Bson) -> anyhow::Result<String> {
-    if let Bson::String(string) = bson { Ok(string) } else { Err(anyhow::anyhow!("bson_to_string failed")) }
+pub fn msgpack_decode(raw: Vec<u8>) -> anyhow::Result<Msgpack> {
+    Ok(rmpv::decode::read_value(&mut raw.as_slice())?)
 }
 
 pub fn json_to_string(json: Json) -> anyhow::Result<String> {

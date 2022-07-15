@@ -1,14 +1,41 @@
 use crate::{prelude::*, model::*};
-use mongodb::{Client, Database, Collection};
+use mongodb::{Client, Database, Collection, bson};
+use bson::{Bson, Document as BsonDocument, bson, doc as bson_doc, Binary as BsonBinary};
+
+// region: util
+
+fn hash_to_bson_bin(hash: Hash) -> BsonBinary {
+    BsonBinary { subtype: bson::spec::BinarySubtype::Generic, bytes: hash.to_vec() }
+}
+
+fn bson_bin_to_hash(raw: BsonBinary) -> Hash {
+    let BsonBinary { bytes, subtype } = raw;
+    debug_assert_eq!(subtype, bson::spec::BinarySubtype::Generic);
+    bytes.try_into().unwrap()
+}
+
+fn bson_to_hash(bson: Bson) -> anyhow::Result<Hash> {
+    if let Bson::Binary(raw) = bson { Ok(bson_bin_to_hash(raw)) } else { Err(anyhow::anyhow!("bson_to_bin failed")) }
+}
+
+fn bson_to_doc(bson: Bson) -> anyhow::Result<BsonDocument> {
+    if let Bson::Document(doc) = bson { Ok(doc) } else { Err(anyhow::anyhow!("bson_to_doc failed")) }
+}
+
+fn bson_to_string(bson: Bson) -> anyhow::Result<String> {
+    if let Bson::String(string) = bson { Ok(string) } else { Err(anyhow::anyhow!("bson_to_string failed")) }
+}
+
+// endregion
 
 // region: boilerplate code for serializing convert
 
 type DStateMap = HashMap<String, BsonBinary>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DState {
-    pub data: DStateMap,
-    pub page: DStateMap,
+struct DState {
+    data: DStateMap,
+    page: DStateMap,
 }
 
 fn state_map_to_doc(map: StateMap) -> DStateMap {
@@ -190,13 +217,17 @@ impl Db {
     }
 
     #[inline]
-    pub async fn add_data_object(&self, hash: Hash, content: BsonDocument) -> anyhow::Result<()> {
-        write_content(&self.coll_vcs_objects_data, hash, content.into()).await
+    pub async fn add_data_object(&self, hash: Hash, content: Json) -> anyhow::Result<()> {
+        let bson = Bson::try_from(content)?;
+        assert!(matches!(bson, Bson::Document(_)));
+        write_content(&self.coll_vcs_objects_data, hash, bson).await
     }
 
     #[inline]
-    pub async fn get_data_object(&self, hash: Hash) -> anyhow::Result<BsonDocument> {
-        bson_to_doc(read_content(&self.coll_vcs_objects_data, hash).await?)
+    pub async fn get_data_object(&self, hash: Hash) -> anyhow::Result<Json> {
+        let bson = read_content(&self.coll_vcs_objects_data, hash).await?;
+        assert!(matches!(bson, Bson::Document(_)));
+        Ok(bson.try_into()?)
     }
 
     #[inline]
@@ -215,8 +246,10 @@ impl Db {
     }
 
     #[inline]
-    pub async fn update_data(&self, path: String, content: BsonDocument) -> anyhow::Result<()> {
-        write_latest(&self.coll_latest_data, path, content).await
+    pub async fn update_data(&self, path: String, content: Json) -> anyhow::Result<()> {
+        let bson = Bson::try_from(content)?;
+        assert!(matches!(bson, Bson::Document(_)));
+        write_latest(&self.coll_latest_data, path, bson_to_doc(bson)?).await
     }
 
     #[inline]

@@ -169,6 +169,6 @@ impl Repo {
 
     #[inline]
     pub fn get_commit(&self, hash: Hash) -> anyhow::Result<Commit> {
-        Ok(bson::from_slice(&read_blob(self.path.commit(hash))?)?)
+        Ok(rmp_serde::from_slice(&read_blob(self.path.commit(hash))?)?)
     }
 }
