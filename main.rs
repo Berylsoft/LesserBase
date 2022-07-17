@@ -14,7 +14,7 @@ struct Args {
 
 fn main() {
     let Args { path, command } = Args::from_args();
-    let repo = Repo::new(path).unwrap();
+    let (repo, _db_rx) = Repo::new(path).unwrap();
     repo.init().unwrap();
     let cmd = serde_json::from_str(&fs::read_to_string(command).unwrap()).unwrap();
     println!("{:?}", cmd);

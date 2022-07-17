@@ -72,11 +72,33 @@ macro_rules! path_builder_get_impl {
     };
 }
 
-path_builder_get_impl!(root, config, objects, data_objects, page_objects, commits, states, refs,);
+path_builder_get_impl!(
+    root,
+    config,
+    objects,
+    data_objects,
+    page_objects,
+    commits,
+    states,
+    refs,
+);
+
+pub enum DbOp {
+    AddDataObject { hash: Hash, content: Json },
+    AddPageObject { hash: Hash, content: String },
+    AddCommit { hash: Hash, commit: Commit },
+    AddState { hash: Hash, state: State },
+    CreateRef { branch: Branch, hash: Hash },
+    UpdateRef { branch: Branch, hash: Hash },
+}
+
+type DbTx = Sender<DbOp>;
+type DbRx = Receiver<DbOp>;
 
 pub struct Repo {
     config: RepoConfig,
     path: PathBuilder,
+    db_tx: DbTx,
 }
 
 use fs::read as read_blob;
@@ -89,32 +111,34 @@ fn write_blob<P: AsRef<Path>>(path: P, blob: &[u8]) -> io::Result<()> {
 }
 
 impl Repo {
-    pub fn new(path: PathBuf) -> anyhow::Result<Repo> {
+    pub fn new(path: PathBuf) -> anyhow::Result<(Repo, DbRx)> {
         let path = PathBuilder::new(path);
         if file_detected(&path.config())? {
             let config: RepoConfig = toml::from_str(fs::read_to_string(path.config())?.as_str())?;
             if config.version != VERSION {
                 Err(anyhow::anyhow!("config version {} != currect version {}", config.version, VERSION))
             } else {
-                let repo = Repo { config, path };
+                let (db_tx, db_rx) = channel();
+                let repo = Repo { config, path, db_tx };
                 if !file_detected(&repo.path.aref(&repo.config.online_branch))? {
                     repo.init()?;
                 }
-                Ok(repo)
+                Ok((repo, db_rx))
             }
         } else {
             Err(anyhow::anyhow!("config not exist"))
         }
     }
 
-    pub fn new_with_default_config(path: PathBuf) -> anyhow::Result<Repo> {
+    pub fn new_with_default_config(path: PathBuf) -> anyhow::Result<(Repo, DbRx)> {
         fs::create_dir_all(&path)?;
         let path = PathBuilder::new(path);
         let config = RepoConfig::default();
         write_blob(path.config(), &toml::to_vec(&config)?)?;
-        let repo = Repo { config, path };
+        let (db_tx, db_rx) = channel();
+        let repo = Repo { config, path, db_tx };
         repo.init()?;
-        Ok(repo)
+        Ok((repo, db_rx))
     }
 
     pub fn init(&self) -> io::Result<()> {
@@ -201,7 +225,7 @@ impl Repo {
         let blob = msgpack_encode(json_to_msgpack(content.clone()))?;
         let hash = hash_all(&blob);
         write_blob(self.path.data_object(hash), &blob)?;
-        // db.add_data_object(hash, content)?;
+        self.db_tx.send(DbOp::AddDataObject { hash, content })?;
         Ok(hash)
     }
 
@@ -209,7 +233,7 @@ impl Repo {
         let blob = content.as_bytes();
         let hash = hash_all(blob);
         write_blob(self.path.page_object(hash), blob)?;
-        // db.add_page_object(hash, content)?;
+        self.db_tx.send(DbOp::AddPageObject { hash, content })?;
         Ok(hash)
     }
 
@@ -217,26 +241,26 @@ impl Repo {
         let blob = rmp_serde::to_vec_named(commit)?;
         let hash = hash_all(&blob);
         write_blob(self.path.commit(hash), &blob)?;
-        // db.add_commit(hash, &commit)?;
+        self.db_tx.send(DbOp::AddCommit { hash, commit: commit.clone() })?;
         Ok(hash)
     }
 
     pub fn add_state(&self, hash: Hash, state: State) -> anyhow::Result<()> {
         let blob = rmp_serde::to_vec_named(&state)?;
         write_blob(self.path.state(hash), &blob)?;
-        // db.add_state(hash, state)?;
+        self.db_tx.send(DbOp::AddState { hash, state })?;
         Ok(())
     }
 
-    pub fn create_ref(&self, branch: &Branch, prev: Hash) -> anyhow::Result<()> {
-        self.fs_create_ref(branch, prev)?;
-        // db.create_ref(branch, prev)?;
+    pub fn create_ref(&self, branch: &Branch, hash: Hash) -> anyhow::Result<()> {
+        self.fs_create_ref(branch, hash)?;
+        self.db_tx.send(DbOp::CreateRef { branch: branch.clone(), hash })?;
         Ok(())
     }
 
-    pub fn update_ref(&self, branch: &Branch, prev: Hash) -> anyhow::Result<()> {
-        self.fs_update_ref(branch, prev)?;
-        // db.update_ref(branch, hash)?;
+    pub fn update_ref(&self, branch: &Branch, hash: Hash) -> anyhow::Result<()> {
+        self.fs_update_ref(branch, hash)?;
+        self.db_tx.send(DbOp::UpdateRef { branch: branch.clone(), hash })?;
         Ok(())
     }
 
