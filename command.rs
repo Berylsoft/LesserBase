@@ -16,7 +16,7 @@ pub struct Command {
 pub enum CommandInner {
     Commit(CCommit),
     CreateCommonBranch(CCreateCommonBranch),
-    MergeCommonBranchToMain(CMergeCommonBranchToMain),
+    MergeBranch(CMergeBranch),
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,10 +29,19 @@ pub struct CCommit {
 
 #[derive(Debug, Deserialize)]
 pub struct CRev {
-    pub kind: RevKind,
+    #[serde(flatten)]
+    pub inner: CRevInner,
     pub object_kind: ObjectKind,
     pub path: String,
-    pub content: Option<Json>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+pub enum CRevInner {
+    Update {
+        content: Json,
+    },
+    Remove,
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,7 +50,8 @@ pub struct CCreateCommonBranch {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CMergeCommonBranchToMain {
-    pub branch: CommonBranch,
+pub struct CMergeBranch {
+    pub from: Branch,
+    pub to: Branch,
     pub comment: String,
 }

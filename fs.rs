@@ -12,6 +12,7 @@ struct PathBuilder {
     data_objects: PathBuf,
     page_objects: PathBuf,
     commits: PathBuf,
+    states: PathBuf,
     refs: PathBuf,
 }
 
@@ -23,6 +24,7 @@ impl PathBuilder {
             data_objects: (&objects).join("data"),
             page_objects: (&objects).join("page"),
             commits: (&root).join("commits"),
+            states: (&root).join("states"),
             refs: (&root).join("refs"),
             root, objects,
         }
@@ -38,6 +40,10 @@ impl PathBuilder {
 
     fn commit(&self, hash: Hash) -> PathBuf {
         self.commits.join(hash_to_hex(hash).as_ref())
+    }
+
+    fn state(&self, hash: Hash) -> PathBuf {
+        self.states.join(hash_to_hex(hash).as_ref())
     }
 
     fn aref(&self, branch: &Branch) -> PathBuf {

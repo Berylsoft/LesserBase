@@ -94,20 +94,16 @@ impl Context {
                 let prev = hex_to_hash(prev)?;
                 assert_eq!(repo.get_ref(&branch)?, prev);
                 let mut rev = Vec::new();
-                for CRev { kind, object_kind, path, content } in crev {
-                    let inner = match kind {
-                        RevKind::Update => {
-                            let content = content.unwrap();
+                for CRev { inner, object_kind, path } in crev {
+                    let inner = match inner {
+                        CRevInner::Update { content } => {
                             let hash = match object_kind {
                                 ObjectKind::Data => self.add_data_object(content).await?,
                                 ObjectKind::Page => self.add_page_object(json_to_string(content)?).await?,
                             };
                             RevInner::Update { hash }
                         },
-                        RevKind::Remove => {
-                            assert!(matches!(content, None));
-                            RevInner::Remove
-                        },
+                        CRevInner::Remove => RevInner::Remove,
                     };
                     rev.push(Rev { inner, object_kind, path });
                 }
@@ -116,18 +112,17 @@ impl Context {
             CommandInner::CreateCommonBranch(CCreateCommonBranch { prev }) => {
                 self.create_branch(hex_to_hash(prev)?, &Branch::Common(CommonBranch { ts, author })).await?;
             },
-            CommandInner::MergeCommonBranchToMain(CMergeCommonBranchToMain { branch, comment }) => {
+            CommandInner::MergeBranch(CMergeBranch { from, to, comment }) => {
                 // TODO prem check
-                let branch = Branch::Common(branch);
-                let prev = repo.get_ref(&branch)?;
-                let commit = if repo.get_ref(&Main)? == repo.get_root_ref(&branch)? {
+                let prev = repo.get_ref(&from)?;
+                let commit = if repo.get_ref(&to)? == repo.get_root_ref(&from)? {
                     // fast-forward
-                    Commit { prev, ts, author, comment, merge: Some(branch.clone()), rev: Vec::new() }
+                    Commit { prev, ts, author, comment, merge: Some(from.clone()), rev: Vec::new() }
                 } else {
                     // 3-way
                     unimplemented!()
                 };
-                self.commit(commit, vec![&Main]).await?;
+                self.commit(commit, vec![&to]).await?;
             }
         }
         Ok(())

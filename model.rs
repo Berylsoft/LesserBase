@@ -59,6 +59,7 @@ pub enum RevKind {
 #[serde(rename_all = "kebab-case", tag = "kind")]
 pub enum Branch {
     Main,
+    Named(String),
     Common(CommonBranch),
 }
 
@@ -74,6 +75,7 @@ impl Branch {
     pub fn to_string(&self) -> String {
         match self {
             Branch::Main => "main".to_owned(),
+            Branch::Named(name) => name.to_owned(),
             Branch::Common(CommonBranch { ts, author }) => format!("{}-{}", ts, author),
         }
     }
