@@ -72,21 +72,21 @@ macro_rules! path_builder_get_impl {
     };
 }
 
-path_builder_get_impl!(root, config, objects, data_objects, page_objects, commits, refs,);
+path_builder_get_impl!(root, config, objects, data_objects, page_objects, commits, states, refs,);
 
 pub struct Repo {
     config: RepoConfig,
     path: PathBuilder,
 }
 
-fn write_blob(path: PathBuf, blob: &[u8]) -> io::Result<()> {
+use fs::read as read_blob;
+
+fn write_blob<P: AsRef<Path>>(path: P, blob: &[u8]) -> io::Result<()> {
     // TODO: err: hash collision
     let mut file = OpenOptions::new().create_new(true).write(true).open(path)?;
     file.write_all(blob)?;
     Ok(())
 }
-
-// use fs::read as read_blob;
 
 impl Repo {
     pub fn new(path: PathBuf) -> anyhow::Result<Repo> {
@@ -96,40 +96,38 @@ impl Repo {
             if config.version != VERSION {
                 Err(anyhow::anyhow!("config version {} != currect version {}", config.version, VERSION))
             } else {
-                Ok(Repo { config, path })
+                let repo = Repo { config, path };
+                if !file_detected(&repo.path.aref(&repo.config.online_branch))? {
+                    repo.init()?;
+                }
+                Ok(repo)
             }
         } else {
             Err(anyhow::anyhow!("config not exist"))
         }
     }
 
+    pub fn new_with_default_config(path: PathBuf) -> anyhow::Result<Repo> {
+        fs::create_dir_all(&path)?;
+        let path = PathBuilder::new(path);
+        let config = RepoConfig::default();
+        write_blob(path.config(), &toml::to_vec(&config)?)?;
+        let repo = Repo { config, path };
+        repo.init()?;
+        Ok(repo)
+    }
+
     pub fn init(&self) -> io::Result<()> {
-        if !file_detected(&self.path.aref(&Main))? {
-            println!("{:?}", self.path.data_objects());
-            fs::create_dir_all(self.path.data_objects())?;
-            fs::create_dir_all(self.path.page_objects())?;
-            fs::create_dir_all(self.path.commits())?;
-            fs::create_dir_all(self.path.refs())?;
-            self.update_ref(&Main, EMPTY_HASH)?;
-        }
+        fs::create_dir_all(self.path.data_objects())?;
+        fs::create_dir_all(self.path.page_objects())?;
+        fs::create_dir_all(self.path.commits())?;
+        fs::create_dir_all(self.path.states())?;
+        fs::create_dir_all(self.path.refs())?;
+        self.fs_create_ref(&self.config.online_branch, EMPTY_HASH)?;
         Ok(())
     }
 
-    pub fn create_ref(&self, branch: &Branch, hash: Hash) -> io::Result<()> {
-        let mut file = OpenOptions::new().create_new(true).write(true).open(self.path.aref(branch))?;
-        file.write(hash_to_hex(hash).as_bytes())?;
-        file.write(b"\n")?;
-        file.flush()?;
-        Ok(())
-    }
-
-    pub fn update_ref(&self, branch: &Branch, hash: Hash) -> io::Result<()> {
-        let mut file = OpenOptions::new().create(true).append(true).open(self.path.aref(branch))?;
-        file.write(hash_to_hex(hash).as_bytes())?;
-        file.write(b"\n")?;
-        file.flush()?;
-        Ok(())
-    }
+    // region: get from fs
 
     pub fn get_ref(&self, branch: &Branch) -> anyhow::Result<Hash> {
         let mut file = OpenOptions::new().read(true).open(self.path.aref(branch))?;
@@ -157,24 +155,53 @@ impl Repo {
         Ok(result)
     }
 
-    // pub fn get_data_object(&self, hash: Hash) -> anyhow::Result<Json> {
-    //     Ok(msgpack_to_json(msgpack_decode(read_blob(self.path.data_object(hash))?)?))
-    // }
+    pub fn get_data_object(&self, hash: Hash) -> anyhow::Result<Json> {
+        Ok(msgpack_to_json(msgpack_decode(read_blob(self.path.data_object(hash))?)?))
+    }
 
-    // pub fn get_page_object(&self, hash: Hash) -> anyhow::Result<String> {
-    //     Ok(String::from_utf8(read_blob(self.path.page_object(hash))?)?)
-    // }
+    pub fn get_page_object(&self, hash: Hash) -> anyhow::Result<String> {
+        Ok(String::from_utf8(read_blob(self.path.page_object(hash))?)?)
+    }
 
-    // pub fn get_commit(&self, hash: Hash) -> anyhow::Result<Commit> {
-    //     Ok(rmp_serde::from_slice(&read_blob(self.path.commit(hash))?)?)
-    // }
+    pub fn get_commit(&self, hash: Hash) -> anyhow::Result<Commit> {
+        Ok(rmp_serde::from_slice(&read_blob(self.path.commit(hash))?)?)
+    }
+
+    pub fn get_state(&self, hash: Hash) -> anyhow::Result<State> {
+        Ok(rmp_serde::from_slice(&read_blob(self.path.state(hash))?)?)
+    }
+
+    // endregion
+
+    // region: add to fs
+
+    pub fn fs_create_ref(&self, branch: &Branch, hash: Hash) -> io::Result<()> {
+        let mut file = OpenOptions::new().create_new(true).write(true).open(self.path.aref(branch))?;
+        file.write(hash_to_hex(hash).as_bytes())?;
+        file.write(b"\n")?;
+        file.flush()?;
+        Ok(())
+    }
+
+    pub fn fs_update_ref(&self, branch: &Branch, hash: Hash) -> io::Result<()> {
+        let mut file = OpenOptions::new().create(true).append(true).open(self.path.aref(branch))?;
+        file.write(hash_to_hex(hash).as_bytes())?;
+        file.write(b"\n")?;
+        file.flush()?;
+        Ok(())
+    }
+
+    // endregion
+
+    // region: add all
 
     pub fn add_data_object(&self, content: Json) -> anyhow::Result<Hash> {
+        // TODO content: HashMap<String, Json>
         // TODO schema check
         let blob = msgpack_encode(json_to_msgpack(content.clone()))?;
         let hash = hash_all(&blob);
         write_blob(self.path.data_object(hash), &blob)?;
-        // db.add_data_object(hash, content).await?;
+        // db.add_data_object(hash, content)?;
         Ok(hash)
     }
 
@@ -182,35 +209,54 @@ impl Repo {
         let blob = content.as_bytes();
         let hash = hash_all(blob);
         write_blob(self.path.page_object(hash), blob)?;
-        // db.add_page_object(hash, content).await?;
+        // db.add_page_object(hash, content)?;
         Ok(hash)
     }
 
-    pub fn create_branch(&self, branch: &Branch, prev: Hash) -> anyhow::Result<()> {
-        self.create_ref(branch, prev)?;
-        // db.create_ref(branch, prev).await?;
+    pub fn add_commit(&self, commit: &Commit) -> anyhow::Result<Hash> {
+        let blob = rmp_serde::to_vec_named(commit)?;
+        let hash = hash_all(&blob);
+        write_blob(self.path.commit(hash), &blob)?;
+        // db.add_commit(hash, &commit)?;
+        Ok(hash)
+    }
+
+    pub fn add_state(&self, hash: Hash, state: State) -> anyhow::Result<()> {
+        let blob = rmp_serde::to_vec_named(&state)?;
+        write_blob(self.path.state(hash), &blob)?;
+        // db.add_state(hash, state)?;
         Ok(())
     }
 
-    pub fn commit(&self, commit: Commit, branches: Vec<&Branch>) -> anyhow::Result<()> {
-        let blob = rmp_serde::to_vec_named(&commit)?;
-        let hash = hash_all(&blob);
+    pub fn create_ref(&self, branch: &Branch, prev: Hash) -> anyhow::Result<()> {
+        self.fs_create_ref(branch, prev)?;
+        // db.create_ref(branch, prev)?;
+        Ok(())
+    }
 
-        write_blob(self.path.commit(hash), &blob)?;
-        // db.add_commit(hash, &commit).await?;
+    pub fn update_ref(&self, branch: &Branch, prev: Hash) -> anyhow::Result<()> {
+        self.fs_update_ref(branch, prev)?;
+        // db.update_ref(branch, hash)?;
+        Ok(())
+    }
+
+    // endregion
+
+    // region: high level methods
+
+    pub fn commit(&self, commit: Commit, branches: Vec<&Branch>) -> anyhow::Result<()> {
+        let hash = self.add_commit(&commit)?;
 
         for branch in branches {
             self.update_ref(branch, hash)?;
-            // db.update_ref(branch, hash).await?;
         }
 
-        // let mut state = self.get_state(commit.prev).await?;
-        // state.update(commit.rev);
-        // self.add_state(hash, state).await?;
-        // let mut state = db.get_state(commit.prev).await?;
-        // state.update(commit.rev);
-        // db.add_state(hash, state).await?;
+        let mut state = self.get_state(commit.prev)?;
+        state.update(commit.rev);
+        self.add_state(hash, state)?;
 
         Ok(())
     }
+
+    // endregion
 }

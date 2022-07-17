@@ -25,7 +25,7 @@ impl Repo {
                 self.commit(Commit { prev, ts, author, comment, merge: None, rev }, vec![&branch])?;
             },
             CommandInner::CreateCommonBranch(CCreateCommonBranch { prev }) => {
-                self.create_branch(&Branch::Common(CommonBranch { ts, author }), hex_to_hash(prev)?)?;
+                self.create_ref(&Branch::Common(CommonBranch { ts, author }), hex_to_hash(prev)?)?;
             },
             CommandInner::MergeBranch(CMergeBranch { from, to, comment }) => {
                 // TODO prem check

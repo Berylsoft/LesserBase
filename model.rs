@@ -98,4 +98,11 @@ impl State {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RepoConfig {
     pub version: String,
+    pub online_branch: Branch,
+}
+
+impl Default for RepoConfig {
+    fn default() -> RepoConfig {
+        RepoConfig { version: VERSION.to_owned(), online_branch: Main }
+    }
 }
