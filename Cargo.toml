@@ -13,13 +13,9 @@ path = "lib.rs"
 name = "lesserbase"
 path = "main.rs"
 
-# [[bin]]
-# name = "lesserbase-server"
-# path = "server.rs"
-
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-futures = "0.3"
+# tokio = { version = "1", features = ["full"] }
+# futures = "0.3"
 structopt = "0.3"
 hex = "0.4"
 anyhow = "1.0"
@@ -31,4 +27,4 @@ jsonschema = { version = "0.16", default-features = false }
 rmp-serde = "1"
 rmpv = "1"
 toml = "0.5"
-mongodb = "2.2"
+# mongodb = "2.2"

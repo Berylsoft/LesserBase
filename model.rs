@@ -94,3 +94,8 @@ impl State {
         State { data: HashMap::new(), page: HashMap::new() }
     }
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RepoConfig {
+    pub version: String,
+}

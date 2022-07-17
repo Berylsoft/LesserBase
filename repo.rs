@@ -1,8 +1,18 @@
 use crate::{prelude::*, model::*};
 
-#[derive(Debug, Serialize, Deserialize)]
-struct RepoConfig {
-    version: String,
+impl State {
+    pub fn update(&mut self, rev: Vec<Rev>) {
+        for Rev { inner, object_kind, path } in rev {
+            let dest = match object_kind {
+                ObjectKind::Data => &mut self.data,
+                ObjectKind::Page => &mut self.page,
+            };
+            let _ = match inner {
+                RevInner::Update { hash } => dest.insert(path, hash),
+                RevInner::Remove => dest.remove(&path),
+            };
+        }
+    }
 }
 
 struct PathBuilder {
@@ -76,7 +86,7 @@ fn write_blob(path: PathBuf, blob: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-use fs::read as read_blob;
+// use fs::read as read_blob;
 
 impl Repo {
     pub fn new(path: PathBuf) -> anyhow::Result<Repo> {
@@ -138,43 +148,69 @@ impl Repo {
     }
 
     pub fn get_all_ref(&self, branch: &Branch) -> anyhow::Result<Vec<Hash>> {
-        let mut file = OpenOptions::new().read(true).open(self.path.aref(branch))?;
-        let mut buf = String::new();
-        file.read_to_string(&mut buf)?;
+        let file = OpenOptions::new().read(true).open(self.path.aref(branch))?;
+        let buf = BufReader::new(file);
         let mut result = Vec::new();
-        for h in buf.split('\n') {
-            result.push(hex_to_hash(h)?)
+        for h in buf.lines() {
+            result.push(hex_to_hash(h?)?)
         }
         Ok(result)
     }
 
-    #[inline]
-    pub fn add_data_object(&self, hash: Hash, blob: &[u8]) -> io::Result<()> {
-        write_blob(self.path.data_object(hash), blob)
+    // pub fn get_data_object(&self, hash: Hash) -> anyhow::Result<Json> {
+    //     Ok(msgpack_to_json(msgpack_decode(read_blob(self.path.data_object(hash))?)?))
+    // }
+
+    // pub fn get_page_object(&self, hash: Hash) -> anyhow::Result<String> {
+    //     Ok(String::from_utf8(read_blob(self.path.page_object(hash))?)?)
+    // }
+
+    // pub fn get_commit(&self, hash: Hash) -> anyhow::Result<Commit> {
+    //     Ok(rmp_serde::from_slice(&read_blob(self.path.commit(hash))?)?)
+    // }
+
+    pub fn add_data_object(&self, content: Json) -> anyhow::Result<Hash> {
+        // TODO schema check
+        let blob = msgpack_encode(json_to_msgpack(content.clone()))?;
+        let hash = hash_all(&blob);
+        write_blob(self.path.data_object(hash), &blob)?;
+        // db.add_data_object(hash, content).await?;
+        Ok(hash)
     }
 
-    #[inline]
-    pub fn get_data_object(&self, hash: Hash) -> io::Result<Vec<u8>> {
-        read_blob(self.path.data_object(hash))
+    pub fn add_page_object(&self, content: String) -> anyhow::Result<Hash> {
+        let blob = content.as_bytes();
+        let hash = hash_all(blob);
+        write_blob(self.path.page_object(hash), blob)?;
+        // db.add_page_object(hash, content).await?;
+        Ok(hash)
     }
 
-    #[inline]
-    pub fn add_page_object(&self, hash: Hash, blob: &[u8]) -> io::Result<()> {
-        write_blob(self.path.page_object(hash), blob)
+    pub fn create_branch(&self, branch: &Branch, prev: Hash) -> anyhow::Result<()> {
+        self.create_ref(branch, prev)?;
+        // db.create_ref(branch, prev).await?;
+        Ok(())
     }
 
-    #[inline]
-    pub fn get_page_object(&self, hash: Hash) -> io::Result<Vec<u8>> {
-        read_blob(self.path.page_object(hash))
-    }
+    pub fn commit(&self, commit: Commit, branches: Vec<&Branch>) -> anyhow::Result<()> {
+        let blob = rmp_serde::to_vec_named(&commit)?;
+        let hash = hash_all(&blob);
 
-    #[inline]
-    pub fn add_commit(&self, hash: Hash, blob: &[u8]) -> io::Result<()> {
-        write_blob(self.path.commit(hash), blob)
-    }
+        write_blob(self.path.commit(hash), &blob)?;
+        // db.add_commit(hash, &commit).await?;
 
-    #[inline]
-    pub fn get_commit(&self, hash: Hash) -> anyhow::Result<Commit> {
-        Ok(rmp_serde::from_slice(&read_blob(self.path.commit(hash))?)?)
+        for branch in branches {
+            self.update_ref(branch, hash)?;
+            // db.update_ref(branch, hash).await?;
+        }
+
+        // let mut state = self.get_state(commit.prev).await?;
+        // state.update(commit.rev);
+        // self.add_state(hash, state).await?;
+        // let mut state = db.get_state(commit.prev).await?;
+        // state.update(commit.rev);
+        // db.add_state(hash, state).await?;
+
+        Ok(())
     }
 }
